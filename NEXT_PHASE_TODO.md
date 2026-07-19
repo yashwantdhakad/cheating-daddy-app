@@ -46,6 +46,22 @@ whenever there's time. Mark `[x]` when done; add new ideas as they come up.
       that died before sending any message (e.g. a native-level crash) left
       the UI stuck on "Loading Whisper model..." forever, which read as a hang
       even when the app hadn't technically frozen.
+- [x] **Local AI kill switch**: after the above fix, one Windows tester still
+      hit the crash-prone path because their `preferences.json` had a stale
+      `transcriptionSource: 'local'` saved from *before* the transcription/
+      answer-provider decoupling fix — an old bug re-surfacing as leftover
+      state. Rather than chase every possible stale-preference combination,
+      local AI (native Whisper worker + the Ollama/LM Studio "Local AI" mode)
+      is now disabled by default, gated behind `ENABLE_LOCAL_AI=true` in
+      `.env`, checked authoritatively in `initializeLocalSession` regardless
+      of what's saved in preferences — so old/stale state can never bypass it.
+      With it off: BYOK/hybrid transcription always forces Groq cloud Whisper
+      (clean error if no Groq key); explicit "Local AI" mode refuses outright
+      with a clear status message. Verified with 4 scenarios: Groq key present
+      (silently forces groq-api, session starts), no Groq key (clean refusal,
+      no crash), explicit Local AI mode requested (refused before touching
+      Ollama/Whisper at all), switch explicitly enabled (original behavior
+      unchanged).
 - [ ] Investigate GPU/acceleration options for the local Whisper worker on
       Windows/Linux (currently forced `dtype: 'q8', device: 'cpu'` for
       stability — see `whisperWorker.js`). macOS users get by fine on CPU;

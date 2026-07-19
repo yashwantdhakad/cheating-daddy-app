@@ -18,7 +18,7 @@ A real-time AI assistant that provides contextual help during video calls, inter
 
 ## Features
 
-- **On-Device Whisper Transcription**: Transcribe audio 100% locally and privately (no API costs, no third-party transcription endpoints). Supports different model sizes (Tiny/Base/Small/Medium).
+- **Cloud Whisper Transcription (default)**: Fast, free transcription via Groq's cloud Whisper API — no local download, nothing to go wrong. **On-device Whisper is available but opt-in** (`ENABLE_LOCAL_AI=true` — see Troubleshooting) for fully offline/private processing; supports different model sizes (Tiny/Base/Small/Medium).
 - **Multiple AI Providers (BYOK)**: Supports Anthropic Claude, OpenAI ChatGPT, Google Gemini, and Groq Cloud for answering questions. Simple selection card interface.
 - **Screen & Audio Capture**: Analyzes what you see and hear for contextual responses.
 - **Multiple Profiles**: Interview, Sales Call, Business Meeting, Presentation, Negotiation.
@@ -32,8 +32,8 @@ A real-time AI assistant that provides contextual help during video calls, inter
 1. **Install Dependencies**: `npm install`
 2. **Run the App**: `npm start`
 3. **Choose Mode**:
-    - **BYOK (Bring Your Own Keys)**: Choose your active provider (Groq, Claude, OpenAI, or Gemini), enter the API key, and configure model options. Audio is transcribed 100% locally using Whisper.
-    - **Local AI**: Connect to a local Ollama or LM Studio instance for fully offline/private processing.
+    - **BYOK (Bring Your Own Keys)**: Choose your active provider (Groq, Claude, OpenAI, or Gemini), enter the API key, and configure model options. Audio is transcribed via Groq's cloud Whisper by default.
+    - **Local AI**: Connect to a local Ollama or LM Studio instance for fully offline/private processing. **Requires `ENABLE_LOCAL_AI=true` in `.env`** — see [Local AI Setup](#local-ai-setup-ollama--lm-studio) and [Troubleshooting](#troubleshooting).
 
 ## Configuration & Environment Variables
 
@@ -53,8 +53,12 @@ reintroduce env-var overrides for *behavior* — only for *credentials*.
 
 ## Local AI Setup (Ollama / LM Studio)
 
+> **Requires `ENABLE_LOCAL_AI=true` in `.env`** — disabled by default (see
+> [Troubleshooting](#troubleshooting)). Without it, choosing Local AI in
+> Settings will show "Local AI is disabled" instead of starting a session.
+
 Local mode runs everything on your machine — no API keys, no per-request cost,
-fully offline. In Settings, choose **Local AI** and pick a backend:
+fully offline. Once enabled, in Settings choose **Local AI** and pick a backend:
 
 - **Ollama**: install from [ollama.com](https://ollama.com), then `ollama pull <model>` (e.g. `gemma3:4b`, `llama3.1`). Point the app at `http://127.0.0.1:11434` (default) — the model dropdown refreshes live from whatever you have pulled.
 - **LM Studio**: load a model in LM Studio, then **start its local server** (Developer tab → Start Server). The model in LM Studio's chat window being "loaded" is not enough — the *server* has to be running for this app to reach it, or you'll see "Cannot reach LM Studio (is the local server started?)". Default URL: `http://127.0.0.1:1234`.
@@ -80,18 +84,27 @@ Linux-specific fallback. macOS and Windows are unaffected.
 
 ## Troubleshooting
 
-**"Protobuf parsing failed" / Whisper worker crashes on Windows**: this means
-the local Whisper model file downloaded corrupted or incomplete — common on
-unstable or corporate-proxied connections, or when antivirus software
-interferes with the download mid-write. This is an environment issue, not a
-platform bug (the same code runs identically on macOS/Windows/Linux — it just
-depends on the download completing intact). The app auto-recovers: it clears
-the corrupted cache and, if you have a Groq key configured, automatically
-switches transcription to Groq's cloud Whisper (no local download involved at
-all) so the next session works without you doing anything. If you don't have a
-Groq key yet, get a free one at [console.groq.com/keys](https://console.groq.com/keys),
-or manually delete the `whisper-models` folder shown in the error log and
-retry on a more stable connection.
+**Local AI is disabled by default.** The native on-device Whisper worker (used
+for local transcription and by the Ollama/LM Studio "Local AI" mode) has
+caused real crashes on some Windows machines — most often
+`"Protobuf parsing failed"`, meaning the Whisper model file downloaded
+corrupted or incomplete (common on unstable/corporate-proxied connections, or
+antivirus interfering with the download mid-write). Recovering by re-trying
+another local model over the same broken connection just crash-loops.
+
+Because of this, **local AI requires an explicit opt-in**: set
+`ENABLE_LOCAL_AI=true` in `.env` to use it. With it unset (the default), the
+app never starts the native Whisper worker or the Ollama/LM Studio local
+mode — transcription always goes through Groq's cloud Whisper instead, which
+requires a `GROQ_API_KEY` in `.env` or entered in Settings. If you see
+`"Local transcription is disabled..."` in the status bar, that's this switch —
+either add a Groq key, or set `ENABLE_LOCAL_AI=true` if you specifically want
+on-device/offline processing and have verified it's stable on your machine.
+
+If you enable it and hit the Protobuf error, manually delete the
+`whisper-models` folder shown in the error log and retry on a more stable
+connection — or just leave the switch off and use Groq's cloud Whisper, which
+doesn't touch this code path at all.
 
 ## Keyboard Shortcuts
 

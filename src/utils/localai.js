@@ -700,6 +700,36 @@ async function initializeLocalSession(host, model, whisperModel, profile, custom
         localAnswerMode = answerMode;
 
         const storage = require('../storage');
+
+        // Kill switch: local AI is disabled unless ENABLE_LOCAL_AI is explicitly set.
+        // Checked here - the one place every local-AI path (full Local AI mode via
+        // Ollama/LM Studio, and the BYOK-hybrid on-device-Whisper path) goes through -
+        // so a stale preference saved before this switch existed can't bypass it.
+        if (!storage.isLocalAiEnabled()) {
+            if (backend !== 'byok') {
+                // Explicit "Use Local AI" mode was requested (Ollama/LM Studio) - refuse outright.
+                console.error('[LocalAI] Local AI mode requested but disabled (set ENABLE_LOCAL_AI=true in .env to enable)');
+                sendToRenderer('session-initializing', false);
+                sendToRenderer('update-status', 'Local AI is disabled. Set ENABLE_LOCAL_AI=true in .env to enable it.');
+                return false;
+            }
+            // BYOK hybrid path: on-device Whisper is off, so transcription must go
+            // through Groq's cloud Whisper instead - regardless of what whisperModel
+            // was requested (a stale 'local' transcriptionSource preference from an
+            // older app version must not be able to re-enable the native worker).
+            if (!getGroqApiKey() || !getGroqApiKey().trim()) {
+                console.error('[LocalAI] Local Whisper disabled and no Groq key configured - cannot transcribe');
+                sendToRenderer('session-initializing', false);
+                sendToRenderer(
+                    'update-status',
+                    'Local transcription is disabled. Add a Groq API key for cloud transcription, or set ENABLE_LOCAL_AI=true in .env to allow on-device Whisper.'
+                );
+                return false;
+            }
+            whisperModel = 'groq-api';
+            console.log('[LocalAI] Local AI disabled - forcing Groq cloud Whisper for transcription');
+        }
+
         const prefs = storage.getPreferences();
         const activeVadMode = prefs.vadMode || 'VERY_AGGRESSIVE';
         vadConfig = VAD_MODES[activeVadMode] || VAD_MODES.VERY_AGGRESSIVE;

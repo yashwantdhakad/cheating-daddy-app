@@ -289,6 +289,19 @@ function migrateCredentialsEncryption() {
     console.log('Migrated stored credentials to encrypted format');
 }
 
+// Kill switch: on-device local AI (native Whisper transcription, and the
+// Ollama/LM Studio "Local AI" mode) is DISABLED by default. It's off by
+// default because the native ONNX Whisper worker has caused real crashes on
+// some Windows machines (corrupted model downloads triggering a crash loop —
+// see whisperWorker.js). Set ENABLE_LOCAL_AI=true in .env to opt back in.
+// This is a blanket switch, checked authoritatively in initializeLocalSession
+// regardless of what's saved in preferences.json - so a stale preference from
+// before this switch existed can never silently re-enable local Whisper.
+function isLocalAiEnabled() {
+    const v = (process.env.ENABLE_LOCAL_AI || '').trim().toLowerCase();
+    return v === 'true' || v === '1' || v === 'yes';
+}
+
 function getApiKey() {
     return process.env.GEMINI_API_KEY || getCredentials().apiKey || '';
 }
@@ -604,6 +617,8 @@ module.exports = {
     getConfig,
     setConfig,
     updateConfig,
+
+    isLocalAiEnabled,
 
     // Credentials
     getCredentials,
