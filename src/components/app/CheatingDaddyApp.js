@@ -1047,8 +1047,13 @@ export class CheatingDaddyApp extends LitElement {
                         class="live-bar-text clickable"
                         @click=${() => this._toggleClickThrough()}
                         title="Ghost mode: clicks pass through to the app behind. Toggle with Cmd+M / Ctrl+M."
-                        >[ghost ${this._isClickThrough ? 'on' : 'off'}]</span
                     >
+                        ${
+                            this._isClickThrough
+                                ? `[ghost on - press ${process.platform === 'darwin' ? 'Cmd+M' : 'Ctrl+M'} to turn off]`
+                                : '[ghost off]'
+                        }
+                    </span>
                     <span class="live-bar-text clickable" @click=${() => this.handleHideToggle()}>[hide]</span>
                 </div>
             </div>
