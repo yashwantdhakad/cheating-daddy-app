@@ -2,7 +2,7 @@ const { Ollama } = require('ollama');
 const { getSystemPrompt } = require('./prompts');
 const { getGroqApiKey } = require('../storage');
 const { sendToRenderer, initializeNewSession, saveConversationTurn, stripThinkingTags, dispatchToAnswerProvider } = require('./gemini');
-const { pcmToWavBuffer, STREAM_UI_INTERVAL_MS } = require('../audioUtils');
+const { pcmToWavBuffer, STREAM_UI_INTERVAL_MS, MAX_ANSWER_HISTORY_MESSAGES } = require('../audioUtils');
 
 // ── State ──
 
@@ -544,8 +544,8 @@ async function sendToLmStudio(transcription) {
         content: transcription.trim(),
     });
 
-    if (localConversationHistory.length > 20) {
-        localConversationHistory = localConversationHistory.slice(-20);
+    if (localConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+        localConversationHistory = localConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
     }
 
     const controller = new AbortController();
@@ -643,8 +643,8 @@ async function sendLmStudioImage(base64Data, prompt) {
 
         // Store text-only version in history
         localConversationHistory.push({ role: 'user', content: prompt });
-        if (localConversationHistory.length > 20) {
-            localConversationHistory = localConversationHistory.slice(-20);
+        if (localConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+            localConversationHistory = localConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
         }
 
         const messages = [
@@ -712,8 +712,8 @@ async function sendToOllama(transcription) {
     });
 
     // Keep history manageable
-    if (localConversationHistory.length > 20) {
-        localConversationHistory = localConversationHistory.slice(-20);
+    if (localConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+        localConversationHistory = localConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
     }
 
     const watchdog = createStallWatchdog(abortOllama);
@@ -1073,8 +1073,8 @@ async function sendLocalImage(base64Data, prompt) {
             // Store text-only version in history
             localConversationHistory.push({ role: 'user', content: prompt });
 
-            if (localConversationHistory.length > 20) {
-                localConversationHistory = localConversationHistory.slice(-20);
+            if (localConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+                localConversationHistory = localConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
             }
 
             const messages = [

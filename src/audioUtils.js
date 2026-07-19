@@ -5,6 +5,14 @@ const path = require('path');
 // Keeping it in one place prevents the two files from drifting to different values.
 const STREAM_UI_INTERVAL_MS = 80;
 
+// Max chat messages (question+answer pairs, ×2) resent as history on every answer-API
+// call. Was 20 (10 turns) - each interview answer runs long, so 10 turns of history
+// could be 3000-5000+ input tokens on EVERY question, burning through free-tier
+// tokens-per-minute limits fast and slowing time-to-first-token. 8 messages (4 turns)
+// is enough for follow-up coherence ("what about X" / "can you elaborate") without
+// re-sending the whole interview each time.
+const MAX_ANSWER_HISTORY_MESSAGES = 8;
+
 // Build a WAV container Buffer from raw PCM data (does NOT touch the filesystem).
 // pcmToWav (below) uses this for on-disk debugging; localai.js uses it to produce
 // an in-memory Blob for Groq Whisper uploads so the header math lives in one place.
@@ -133,6 +141,7 @@ function saveDebugAudio(buffer, type, timestamp = Date.now()) {
 
 module.exports = {
     STREAM_UI_INTERVAL_MS,
+    MAX_ANSWER_HISTORY_MESSAGES,
     pcmToWavBuffer,
     pcmToWav,
     analyzeAudioBuffer,

@@ -1,7 +1,7 @@
 const { GoogleGenAI, Modality } = require('@google/genai');
 const { BrowserWindow, ipcMain } = require('electron');
 const { spawn } = require('child_process');
-const { saveDebugAudio, STREAM_UI_INTERVAL_MS } = require('../audioUtils');
+const { saveDebugAudio, STREAM_UI_INTERVAL_MS, MAX_ANSWER_HISTORY_MESSAGES } = require('../audioUtils');
 const { getSystemPrompt } = require('./prompts');
 const {
     getAvailableModel,
@@ -341,8 +341,8 @@ async function sendToClaude(transcription) {
         content: transcription.trim(),
     });
 
-    if (groqConversationHistory.length > 20) {
-        groqConversationHistory = groqConversationHistory.slice(-20);
+    if (groqConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+        groqConversationHistory = groqConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
     }
 
     try {
@@ -439,8 +439,8 @@ async function sendToGroq(transcription) {
         content: transcription.trim(),
     });
 
-    if (groqConversationHistory.length > 20) {
-        groqConversationHistory = groqConversationHistory.slice(-20);
+    if (groqConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+        groqConversationHistory = groqConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
     }
 
     const controller = new AbortController();
@@ -584,8 +584,8 @@ async function sendToOpenAI(transcription) {
         content: transcription.trim(),
     });
 
-    if (groqConversationHistory.length > 20) {
-        groqConversationHistory = groqConversationHistory.slice(-20);
+    if (groqConversationHistory.length > MAX_ANSWER_HISTORY_MESSAGES) {
+        groqConversationHistory = groqConversationHistory.slice(-MAX_ANSWER_HISTORY_MESSAGES);
     }
 
     const controller = new AbortController();
