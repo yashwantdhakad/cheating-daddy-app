@@ -634,16 +634,11 @@ export class MainView extends LitElement {
                 this._activeAnswerProvider = this._enabledProviders[0] || 'groq';
             }
 
-            // Transcription source is derived from the active provider:
-            // Groq is active → use Groq cloud Whisper (no download).
-            // Any other provider → use local on-device Whisper.
-            // User can override by saving transcriptionSource = 'local' explicitly.
-            const savedSource = prefs.transcriptionSource;
-            if (this._activeAnswerProvider === 'groq' && savedSource !== 'local') {
-                this._transcriptionSource = 'groq';
-            } else {
-                this._transcriptionSource = 'local';
-            }
+            // Transcription source is independent of the answer provider: default to
+            // Groq Whisper whenever a Groq key exists (fast, no local model download),
+            // regardless of which provider answers the question. Explicit 'local'
+            // choice (via the Transcription section) is always respected.
+            this._transcriptionSource = prefs.transcriptionSource === 'local' ? 'local' : 'groq';
 
             this.requestUpdate();
 
@@ -840,10 +835,11 @@ export class MainView extends LitElement {
 
     async _saveActiveAnswerProvider(val) {
         this._activeAnswerProvider = val;
-        // Transcription source automatically follows the active provider
-        this._transcriptionSource = val === 'groq' ? 'groq' : 'local';
+        // Transcription source is independent of the answer provider - Groq Whisper
+        // is used whenever a Groq key exists (fast, free), regardless of which
+        // provider answers the question. Don't clobber the user's explicit choice
+        // (set via the Transcription section) just because they switched providers.
         await cheatingDaddy.storage.updatePreference('activeAnswerProvider', val);
-        await cheatingDaddy.storage.updatePreference('transcriptionSource', this._transcriptionSource);
         this._keyError = false;
         this.requestUpdate();
     }

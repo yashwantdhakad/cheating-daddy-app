@@ -41,20 +41,12 @@ app.whenReady().then(async () => {
     // Encrypt any plaintext API keys left on disk by older versions
     storage.migrateCredentialsEncryption();
 
-    // Apply .env overrides for model preferences.
-    // This lets users set GROQ_MODEL=llama-3.3-70b-versatile etc. in .env
-    // without touching the UI — handy for shared/automated setups.
-    (function applyEnvPreferences() {
-        const overrides = {};
-        if (process.env.GROQ_MODEL) overrides.groqModel = process.env.GROQ_MODEL;
-        if (process.env.OPENAI_MODEL) overrides.openaiModel = process.env.OPENAI_MODEL;
-        if (process.env.ACTIVE_ANSWER_PROVIDER) overrides.activeAnswerProvider = process.env.ACTIVE_ANSWER_PROVIDER;
-        if (process.env.ENABLED_PROVIDERS) overrides.enabledProviders = process.env.ENABLED_PROVIDERS;
-        if (Object.keys(overrides).length > 0) {
-            storage.setPreferences(overrides);
-            console.log('[env] Applied preference overrides from .env:', Object.keys(overrides).join(', '));
-        }
-    })();
+    // Deliberately no .env-driven preference overrides here. Which provider/model
+    // runs is a UI select-field choice (persisted in preferences.json) - an env var
+    // must never silently overwrite it on the next launch. .env supplies API key
+    // *credentials* only (read live via getCredentials()/getApiKey()/etc.), which
+    // don't conflict with the user's selection: the key just backs whichever
+    // provider the UI has active.
 
     // Trigger screen recording permission prompt on macOS if not already granted
     if (process.platform === 'darwin') {

@@ -9,8 +9,12 @@ function getPipeline(modelName, cacheDir) {
         pipelinePromise = (async () => {
             const { pipeline, env } = await import('@huggingface/transformers');
             env.cacheDir = cacheDir;
+            // q8 quantization is ~4x lighter than fp32 with minimal accuracy loss -
+            // fp32 on CPU made whisper-medium/large take minutes per segment and
+            // felt like a system hang. device stays 'cpu' (explicit, not 'auto')
+            // since worker_threads have no GPU/WebGPU context to detect.
             return pipeline('automatic-speech-recognition', modelName, {
-                dtype: 'fp32',
+                dtype: 'q8',
                 device: 'cpu',
             });
         })();

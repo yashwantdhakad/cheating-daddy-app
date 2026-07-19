@@ -318,7 +318,34 @@ function loadWhisperPipeline(modelName) {
                     isWhisperLoading = false;
                     sendToRenderer('whisper-downloading', false);
                     sendToRenderer('update-status', 'Failed to load Whisper model: ' + msg.error);
+
                     teardownWhisperWorker();
+
+                    // Auto-recovery: delete the corrupted model cache after worker is terminated
+                    const fs = require('fs');
+                    const path = require('path');
+                    if (whisperCacheDir && whisperModelName) {
+                        const modelCachePath = path.join(whisperCacheDir, whisperModelName);
+                        if (fs.existsSync(modelCachePath)) {
+                            try {
+                                fs.rmSync(modelCachePath, { recursive: true, force: true });
+                                console.log(`[LocalAI] Cleared corrupted model cache at: ${modelCachePath}`);
+                            } catch (rmError) {
+                                console.error('[LocalAI] Failed to clear corrupted cache:', rmError);
+                            }
+                        }
+                    }
+
+                    // Reset preferences to default 'Xenova/whisper-small' to prevent crash loops
+                    try {
+                        const storage = require('../storage');
+                        storage.updatePreference('localByokWhisperModel', 'Xenova/whisper-small');
+                        storage.updatePreference('whisperModel', 'Xenova/whisper-small');
+                        console.log('[LocalAI] Reset whisperModel preference to Xenova/whisper-small');
+                    } catch (prefError) {
+                        console.error('[LocalAI] Failed to reset whisperModel preference:', prefError);
+                    }
+
                     resolve(null);
                 } else {
                     handleWorkerResult(msg);
@@ -330,13 +357,72 @@ function loadWhisperPipeline(modelName) {
                 isWhisperLoading = false;
                 sendToRenderer('whisper-downloading', false);
                 sendToRenderer('update-status', 'Whisper worker error: ' + err.message);
+
                 teardownWhisperWorker();
+
+                // Auto-recovery: delete the corrupted model cache after worker is terminated
+                const fs = require('fs');
+                const path = require('path');
+                if (whisperCacheDir && whisperModelName) {
+                    const modelCachePath = path.join(whisperCacheDir, whisperModelName);
+                    if (fs.existsSync(modelCachePath)) {
+                        try {
+                            fs.rmSync(modelCachePath, { recursive: true, force: true });
+                            console.log(`[LocalAI] Cleared corrupted model cache at: ${modelCachePath}`);
+                        } catch (rmError) {
+                            console.error('[LocalAI] Failed to clear corrupted cache:', rmError);
+                        }
+                    }
+                }
+
+                // Reset preferences to default 'Xenova/whisper-small' to prevent crash loops
+                try {
+                    const storage = require('../storage');
+                    storage.updatePreference('localByokWhisperModel', 'Xenova/whisper-small');
+                    storage.updatePreference('whisperModel', 'Xenova/whisper-small');
+                    console.log('[LocalAI] Reset whisperModel preference to Xenova/whisper-small');
+                } catch (prefError) {
+                    console.error('[LocalAI] Failed to reset whisperModel preference:', prefError);
+                }
+
                 resolve(null);
             });
 
             whisperWorker.on('exit', code => {
-                if (code !== 0) console.error('[LocalAI] Whisper worker exited with code', code);
-                teardownWhisperWorker();
+                if (code !== 0) {
+                    console.error('[LocalAI] Whisper worker exited with code', code);
+
+                    teardownWhisperWorker();
+
+                    // Auto-recovery: delete the corrupted model cache after worker is terminated
+                    const fs = require('fs');
+                    const path = require('path');
+                    if (whisperCacheDir && whisperModelName) {
+                        const modelCachePath = path.join(whisperCacheDir, whisperModelName);
+                        if (fs.existsSync(modelCachePath)) {
+                            try {
+                                fs.rmSync(modelCachePath, { recursive: true, force: true });
+                                console.log(`[LocalAI] Cleared corrupted model cache on exit at: ${modelCachePath}`);
+                            } catch (rmError) {
+                                console.error('[LocalAI] Failed to clear corrupted cache on exit:', rmError);
+                            }
+                        }
+                    }
+
+                    // Reset preferences to default 'Xenova/whisper-small' to prevent crash loops
+                    try {
+                        const storage = require('../storage');
+                        storage.updatePreference('localByokWhisperModel', 'Xenova/whisper-small');
+                        storage.updatePreference('whisperModel', 'Xenova/whisper-small');
+                        console.log('[LocalAI] Reset whisperModel preference to Xenova/whisper-small');
+                    } catch (prefError) {
+                        console.error('[LocalAI] Failed to reset whisperModel preference:', prefError);
+                    }
+
+                    resolve(null);
+                } else {
+                    teardownWhisperWorker();
+                }
             });
 
             whisperWorker.postMessage({ type: 'load', modelName, cacheDir: whisperCacheDir });
