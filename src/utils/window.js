@@ -120,6 +120,7 @@ function getDefaultKeybinds() {
         moveRight: isMac ? 'Alt+Right' : 'Ctrl+Right',
         toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
         toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
+        minimizeWindow: isMac ? 'Cmd+Shift+H' : 'Ctrl+Shift+H',
         nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
         previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
         nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
@@ -187,6 +188,22 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
             console.log(`Registered toggleVisibility: ${keybinds.toggleVisibility}`);
         } catch (error) {
             console.error(`Failed to register toggleVisibility (${keybinds.toggleVisibility}):`, error);
+        }
+    }
+
+    // Register minimize window shortcut
+    if (keybinds.minimizeWindow) {
+        try {
+            globalShortcut.register(keybinds.minimizeWindow, () => {
+                if (mainWindow.isMinimized()) {
+                    mainWindow.restore();
+                } else {
+                    mainWindow.minimize();
+                }
+            });
+            console.log(`Registered minimizeWindow: ${keybinds.minimizeWindow}`);
+        } catch (error) {
+            console.error(`Failed to register minimizeWindow (${keybinds.minimizeWindow}):`, error);
         }
     }
 
@@ -332,6 +349,10 @@ function setupWindowIpcHandlers(mainWindow, sendToRenderer, geminiSessionRef) {
             mainWindow.setIgnoreMouseEvents(false);
         }
     });
+
+    // Expose authoritative defaults to the renderer so CustomizeView doesn't need
+    // its own duplicate of the keybind map.
+    ipcMain.handle('get-default-keybinds', () => getDefaultKeybinds());
 
     ipcMain.handle('window-minimize', () => {
         if (!mainWindow.isDestroyed()) {

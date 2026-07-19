@@ -510,6 +510,7 @@ export class MainView extends LitElement {
         _geminiKey: { state: true },
         _groqKey: { state: true },
         _openaiKey: { state: true },
+        _openaiModel: { state: true },
         _tokenError: { state: true },
         _keyError: { state: true },
         _useGroqTranscription: { state: true },
@@ -551,6 +552,7 @@ export class MainView extends LitElement {
         this._whisperModel = 'Xenova/whisper-small';
         this._useGroqTranscription = false;
         this._groqModel = 'llama-3.3-70b-versatile';
+        this._openaiModel = 'gpt-4o-mini';
 
         this._animId = null;
         this._time = 0;
@@ -592,6 +594,7 @@ export class MainView extends LitElement {
             this._whisperModel = prefs.whisperModel || 'Xenova/whisper-small';
             this._useGroqTranscription = prefs.useGroqTranscription || false;
             this._groqModel = prefs.groqModel || 'llama-3.3-70b-versatile';
+            this._openaiModel = prefs.openaiModel || 'gpt-4o-mini';
 
             this.requestUpdate();
 
@@ -777,6 +780,12 @@ export class MainView extends LitElement {
             const creds = await cheatingDaddy.storage.getCredentials().catch(() => ({}));
             await cheatingDaddy.storage.setCredentials({ ...creds, openaiKey: val });
         } catch (e) {}
+        this.requestUpdate();
+    }
+
+    async _saveOpenaiModel(val) {
+        this._openaiModel = val;
+        await cheatingDaddy.storage.updatePreference('openaiModel', val);
         this.requestUpdate();
     }
 
@@ -1061,7 +1070,7 @@ export class MainView extends LitElement {
             <div style="margin: 25px 0 15px 0; border-top: 1px dashed var(--border); padding-top: 15px;">
                 <h4 style="margin: 0 0 5px 0; font-size: 0.95em; color: var(--text-muted); font-weight: 600;">Alternative / Fallback Models</h4>
                 <p style="margin: 0; font-size: 0.8em; color: var(--text-muted);">
-                    Configure these if you want to use Anthropic's Claude or Google's Gemini instead of Groq.
+                    Configure these if you want to use Anthropic's Claude, OpenAI's ChatGPT, or Google's Gemini instead of Groq.
                 </p>
             </div>
 
@@ -1079,6 +1088,40 @@ export class MainView extends LitElement {
                     <span class="link" @click=${() => this.onExternalLink('https://platform.claude.com/')}>Get Claude key</span>
                 </div>
             </div>
+
+            <!-- OpenAI API Key -->
+            <div class="form-group">
+                <label class="form-label">OpenAI API Key (Optional)</label>
+                <input
+                    type="password"
+                    placeholder="Optional - replaces Groq for answers when set"
+                    .value=${this._openaiKey}
+                    @input=${e => this._saveOpenaiKey(e.target.value)}
+                />
+                <div class="form-hint">
+                    Uses ChatGPT (OpenAI) for answers.
+                    <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}>Get OpenAI key</span>
+                </div>
+            </div>
+
+            <!-- OpenAI Model Selector -->
+            ${
+                this._openaiKey.trim()
+                    ? html`
+                          <div class="form-group">
+                              <label class="form-label">OpenAI Answer Model</label>
+                              <select .value=${this._openaiModel} @change=${e => this._saveOpenaiModel(e.target.value)}>
+                                  <option value="gpt-4o-mini" ?selected=${this._openaiModel === 'gpt-4o-mini'}>
+                                      GPT-4o Mini (recommended, fast & cheap)
+                                  </option>
+                                  <option value="gpt-4o" ?selected=${this._openaiModel === 'gpt-4o'}>GPT-4o (highly intelligent)</option>
+                                  <option value="gpt-4-turbo" ?selected=${this._openaiModel === 'gpt-4-turbo'}>GPT-4 Turbo</option>
+                                  <option value="gpt-3.5-turbo" ?selected=${this._openaiModel === 'gpt-3.5-turbo'}>GPT-3.5 Turbo (legacy)</option>
+                              </select>
+                          </div>
+                      `
+                    : ''
+            }
 
             <!-- Gemini API Key -->
             <div class="form-group">

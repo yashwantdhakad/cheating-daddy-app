@@ -2,6 +2,7 @@ const { Ollama } = require('ollama');
 const { getSystemPrompt } = require('./prompts');
 const { getGroqApiKey } = require('../storage');
 const { sendToRenderer, initializeNewSession, saveConversationTurn, stripThinkingTags, dispatchToAnswerProvider } = require('./gemini');
+const { pcmToWavBuffer, STREAM_UI_INTERVAL_MS } = require('../audioUtils');
 
 // ── State ──
 
@@ -19,27 +20,6 @@ let localAnswerMode = 'local';
 let useGroqWhisper = false;
 const GROQ_TRANSCRIBE_MODEL = 'whisper-large-v3-turbo';
 
-// Wrap raw 16kHz mono 16-bit PCM in a WAV container for upload
-function pcm16ToWav(pcmBuffer, sampleRate = 16000) {
-    const header = Buffer.alloc(44);
-    const dataSize = pcmBuffer.length;
-    const byteRate = sampleRate * 2; // mono, 16-bit
-    header.write('RIFF', 0);
-    header.writeUInt32LE(dataSize + 36, 4);
-    header.write('WAVE', 8);
-    header.write('fmt ', 12);
-    header.writeUInt32LE(16, 16); // PCM chunk size
-    header.writeUInt16LE(1, 20); // PCM format
-    header.writeUInt16LE(1, 22); // mono
-    header.writeUInt32LE(sampleRate, 24);
-    header.writeUInt32LE(byteRate, 28);
-    header.writeUInt16LE(2, 32); // block align
-    header.writeUInt16LE(16, 34); // bits per sample
-    header.write('data', 36);
-    header.writeUInt32LE(dataSize, 40);
-    return Buffer.concat([header, pcmBuffer]);
-}
-
 async function transcribeWithGroqWhisper(pcm16kBuffer) {
     const apiKey = getGroqApiKey();
     if (!apiKey || !apiKey.trim()) {
@@ -49,7 +29,7 @@ async function transcribeWithGroqWhisper(pcm16kBuffer) {
     }
 
     try {
-        const wav = pcm16ToWav(pcm16kBuffer);
+        const wav = pcmToWavBuffer(pcm16kBuffer, 16000, 1, 16);
         const form = new FormData();
         form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
         form.append('model', GROQ_TRANSCRIBE_MODEL);
@@ -110,8 +90,7 @@ const VAD_MODES = {
 };
 let vadConfig = VAD_MODES.VERY_AGGRESSIVE;
 
-// Throttle streaming UI updates - re-rendering markdown on every token is O(n^2) over a response
-const STREAM_UI_INTERVAL_MS = 80;
+// Throttle streaming UI updates - imported from audioUtils to keep the value in sync with gemini.js
 
 // Abort an Ollama generation if no token arrives for this long - a stalled request
 // otherwise leaves the app stuck on "Generating response..." forever
@@ -1115,7 +1094,7 @@ module.exports = {
         calculateRMS,
         processVAD,
         pcm16ToFloat32,
-        pcm16ToWav,
+        pcm16ToWav: pcmToWavBuffer, // alias – now lives in audioUtils
         VAD_MODES,
         getVadState: () => ({ isSpeaking, speechChunks: speechBuffers.length, speechBytes }),
         resetVadState: () => {

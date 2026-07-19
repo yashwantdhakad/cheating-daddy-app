@@ -204,7 +204,7 @@ export class CustomizeView extends LitElement {
         this.selectedLanguage = 'en-US';
         this.selectedImageQuality = 'medium';
         this.layoutMode = 'normal';
-        this.keybinds = this.getDefaultKeybinds();
+        this.keybinds = {};
         this.onProfileChange = () => {};
         this.onLanguageChange = () => {};
         this.onImageQualityChange = () => {};
@@ -240,8 +240,11 @@ export class CustomizeView extends LitElement {
             this.smartClickThrough = prefs.smartClickThrough ?? false;
             this.autoCopyClipboard = prefs.autoCopyClipboard ?? false;
             this.vadMode = prefs.vadMode || 'VERY_AGGRESSIVE';
+            const defaults = await this._fetchDefaultKeybinds();
             if (keybinds) {
-                this.keybinds = { ...this.getDefaultKeybinds(), ...keybinds };
+                this.keybinds = { ...defaults, ...keybinds };
+            } else {
+                this.keybinds = defaults;
             }
             this.updateBackgroundAppearance();
             this.updateFontSize();
@@ -297,8 +300,19 @@ export class CustomizeView extends LitElement {
         ];
     }
 
-    getDefaultKeybinds() {
-        const isMac = cheatingDaddy.isMacOS || navigator.platform.includes('Mac');
+    // Fetch the authoritative default keybinds from the main process via IPC.
+    // This replaces the old hand-rolled duplicate that had to be kept in sync with window.js.
+    async _fetchDefaultKeybinds() {
+        try {
+            if (window.require) {
+                const { ipcRenderer } = window.require('electron');
+                return await ipcRenderer.invoke('get-default-keybinds');
+            }
+        } catch (e) {
+            console.warn('Could not fetch default keybinds from main process:', e);
+        }
+        // Fallback for non-Electron environments (unlikely but safe)
+        const isMac = navigator.platform.includes('Mac');
         return {
             moveUp: isMac ? 'Alt+Up' : 'Ctrl+Up',
             moveDown: isMac ? 'Alt+Down' : 'Ctrl+Down',
@@ -306,11 +320,13 @@ export class CustomizeView extends LitElement {
             moveRight: isMac ? 'Alt+Right' : 'Ctrl+Right',
             toggleVisibility: isMac ? 'Cmd+\\' : 'Ctrl+\\',
             toggleClickThrough: isMac ? 'Cmd+M' : 'Ctrl+M',
+            minimizeWindow: isMac ? 'Cmd+Shift+H' : 'Ctrl+Shift+H',
             nextStep: isMac ? 'Cmd+Enter' : 'Ctrl+Enter',
             previousResponse: isMac ? 'Cmd+[' : 'Ctrl+[',
             nextResponse: isMac ? 'Cmd+]' : 'Ctrl+]',
             scrollUp: isMac ? 'Cmd+Shift+Up' : 'Ctrl+Shift+Up',
             scrollDown: isMac ? 'Cmd+Shift+Down' : 'Ctrl+Shift+Down',
+            emergencyErase: isMac ? 'Cmd+Shift+E' : 'Ctrl+Shift+E',
         };
     }
 
@@ -322,11 +338,13 @@ export class CustomizeView extends LitElement {
             { key: 'moveRight', name: 'Move Window Right', description: 'Move the app window right' },
             { key: 'toggleVisibility', name: 'Toggle Visibility', description: 'Show or hide the app window' },
             { key: 'toggleClickThrough', name: 'Toggle Click-through', description: 'Enable or disable click-through mode' },
+            { key: 'minimizeWindow', name: 'Minimize / Restore Window', description: 'Minimize the window or restore it' },
             { key: 'nextStep', name: 'Ask Next Step', description: 'Take screenshot and ask for next step' },
             { key: 'previousResponse', name: 'Previous Response', description: 'Move to previous AI response' },
             { key: 'nextResponse', name: 'Next Response', description: 'Move to next AI response' },
             { key: 'scrollUp', name: 'Scroll Response Up', description: 'Scroll response content upward' },
             { key: 'scrollDown', name: 'Scroll Response Down', description: 'Scroll response content downward' },
+            { key: 'emergencyErase', name: 'Emergency Erase', description: 'Hide window and immediately quit the app' },
         ];
     }
 
@@ -494,7 +512,7 @@ export class CustomizeView extends LitElement {
     }
 
     async resetKeybinds() {
-        this.keybinds = this.getDefaultKeybinds();
+        this.keybinds = await this._fetchDefaultKeybinds();
         await cheatingDaddy.storage.setKeybinds(null);
         if (window.require) {
             const { ipcRenderer } = window.require('electron');
@@ -531,7 +549,7 @@ export class CustomizeView extends LitElement {
             }
 
             // Restore keybinds
-            this.keybinds = this.getDefaultKeybinds();
+            this.keybinds = await this._fetchDefaultKeybinds();
             await cheatingDaddy.storage.setKeybinds(null);
             if (window.require) {
                 const { ipcRenderer } = window.require('electron');

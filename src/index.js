@@ -2,6 +2,25 @@ if (require('electron-squirrel-startup')) {
     process.exit(0);
 }
 
+// Load .env (dev convenience; no dependency). Real keys never live in the repo -
+// .env is gitignored and UI-entered keys are stored encrypted via safeStorage.
+(function loadDotEnv() {
+    try {
+        const fs = require('fs');
+        const path = require('path');
+        const envPath = path.join(__dirname, '..', '.env');
+        if (!fs.existsSync(envPath)) return;
+        for (const line of fs.readFileSync(envPath, 'utf8').split('\n')) {
+            const match = /^\s*(\w+)\s*=(.*)$/.exec(line);
+            if (match && !(match[1] in process.env)) {
+                process.env[match[1]] = match[2].trim().replace(/^["']|["']$/g, '');
+            }
+        }
+    } catch (e) {
+        console.warn('Could not load .env:', e.message);
+    }
+})();
+
 const { app, BrowserWindow, shell, ipcMain } = require('electron');
 const { createWindow, updateGlobalShortcuts } = require('./utils/window');
 const { setupGeminiIpcHandlers, stopMacOSAudioCapture, sendToRenderer } = require('./utils/gemini');
@@ -136,6 +155,25 @@ function setupStorageIpcHandlers() {
             return { success: true };
         } catch (error) {
             console.error('Error setting Groq API key:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('storage:get-openai-api-key', async () => {
+        try {
+            return { success: true, data: storage.getOpenaiApiKey() };
+        } catch (error) {
+            console.error('Error getting OpenAI API key:', error);
+            return { success: false, error: error.message };
+        }
+    });
+
+    ipcMain.handle('storage:set-openai-api-key', async (event, openaiApiKey) => {
+        try {
+            storage.setOpenaiApiKey(openaiApiKey);
+            return { success: true };
+        } catch (error) {
+            console.error('Error setting OpenAI API key:', error);
             return { success: false, error: error.message };
         }
     });

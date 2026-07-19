@@ -1,13 +1,14 @@
 const { GoogleGenAI, Modality } = require('@google/genai');
 const { BrowserWindow, ipcMain } = require('electron');
 const { spawn } = require('child_process');
-const { saveDebugAudio } = require('../audioUtils');
+const { saveDebugAudio, STREAM_UI_INTERVAL_MS } = require('../audioUtils');
 const { getSystemPrompt } = require('./prompts');
 const {
     getAvailableModel,
     incrementLimitCount,
     getApiKey,
     getGroqApiKey,
+    getOpenaiApiKey,
     incrementCharUsage,
     getModelForToday,
     getCredentials,
@@ -60,8 +61,7 @@ let messageBuffer = '';
 let transcriptionDebounceTimer = null;
 const TRANSCRIPTION_SILENCE_MS = 1000;
 
-// Throttle streaming UI updates - re-rendering markdown on every token is O(n^2) over a response
-const STREAM_UI_INTERVAL_MS = 80;
+// Throttle streaming UI updates - defined in audioUtils.js so gemini.js and localai.js share one value
 
 // Abort a Groq request if no token arrives for this long - a stalled stream
 // otherwise leaves the app stuck without an answer for the whole turn
@@ -93,6 +93,8 @@ function dispatchTranscription() {
 function dispatchToAnswerProvider(text) {
     if (hasAnthropicKey()) {
         sendToClaude(text);
+    } else if (hasOpenaiKey()) {
+        sendToOpenAI(text);
     } else if (hasGroqKey()) {
         sendToGroq(text);
     } else {
@@ -267,6 +269,12 @@ function getAnthropicApiKey() {
 
 function hasAnthropicKey() {
     const key = getAnthropicApiKey();
+    return key && key.trim() !== '';
+}
+
+// helper to check if openai has been configured
+function hasOpenaiKey() {
+    const key = getOpenaiApiKey();
     return key && key.trim() !== '';
 }
 
@@ -507,6 +515,141 @@ async function sendToGroq(transcription) {
         console.error('Error calling Groq API:', error);
         const message = error.name === 'AbortError' ? 'request stalled and was aborted' : error.message;
         sendToRenderer('update-status', 'Groq error: ' + message);
+    } finally {
+        if (stallTimer) clearTimeout(stallTimer);
+    }
+}
+
+async function sendToOpenAI(transcription) {
+    const openaiApiKey = getOpenaiApiKey();
+    if (!openaiApiKey) {
+        console.log('No OpenAI API key configured, skipping OpenAI response');
+        return;
+    }
+
+    if (!transcription || transcription.trim() === '') {
+        console.log('Empty transcription, skipping OpenAI');
+        return;
+    }
+
+    const prefs = getPreferences();
+    const modelToUse = prefs.openaiModel || 'gpt-4o-mini';
+
+    console.log(`Sending to OpenAI (${modelToUse}):`, transcription.substring(0, 100) + '...');
+
+    groqConversationHistory.push({
+        role: 'user',
+        content: transcription.trim(),
+    });
+
+    if (groqConversationHistory.length > 20) {
+        groqConversationHistory = groqConversationHistory.slice(-20);
+    }
+
+    const controller = new AbortController();
+    let stallTimer = null;
+    const resetStall = () => {
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+            console.error('[OpenAI] Stream stalled, aborting');
+            controller.abort();
+        }, 30000);
+    };
+
+    try {
+        resetStall();
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            signal: controller.signal,
+            headers: {
+                Authorization: `Bearer ${openaiApiKey}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: modelToUse,
+                messages: [{ role: 'system', content: currentSystemPrompt || 'You are a helpful assistant.' }, ...groqConversationHistory],
+                stream: true,
+                temperature: 0.7,
+                max_tokens: 1536,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('OpenAI API error:', response.status, errorText);
+            sendToRenderer('update-status', `OpenAI error: ${response.status}`);
+            return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let isFirst = true;
+        let lastEmit = 0;
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            resetStall();
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
+
+                    try {
+                        const json = JSON.parse(data);
+                        const token = json.choices?.[0]?.delta?.content || '';
+                        if (token) {
+                            fullText += token;
+                            const displayText = stripThinkingTags(fullText);
+                            const now = Date.now();
+                            if (displayText && (isFirst || now - lastEmit >= STREAM_UI_INTERVAL_MS)) {
+                                sendToRenderer(isFirst ? 'new-response' : 'update-response', displayText);
+                                isFirst = false;
+                                lastEmit = now;
+                            }
+                        }
+                    } catch (parseError) {
+                        // Skip invalid JSON chunks
+                    }
+                }
+            }
+        }
+
+        const cleanedResponse = stripThinkingTags(fullText);
+
+        // Flush the final text
+        if (cleanedResponse) {
+            sendToRenderer(isFirst ? 'new-response' : 'update-response', cleanedResponse);
+        }
+
+        const modelKey = modelToUse.split('/').pop();
+        const systemPromptChars = (currentSystemPrompt || 'You are a helpful assistant.').length;
+        const historyChars = groqConversationHistory.reduce((sum, msg) => sum + (msg.content || '').length, 0);
+        const inputChars = systemPromptChars + historyChars;
+        const outputChars = cleanedResponse.length;
+
+        incrementCharUsage('openai', modelKey, inputChars + outputChars);
+
+        if (cleanedResponse) {
+            groqConversationHistory.push({
+                role: 'assistant',
+                content: cleanedResponse,
+            });
+
+            saveConversationTurn(transcription, cleanedResponse);
+        }
+
+        console.log(`OpenAI response completed (${modelToUse})`);
+        sendToRenderer('update-status', 'Listening...');
+    } catch (error) {
+        console.error('Error calling OpenAI API:', error);
+        const message = error.name === 'AbortError' ? 'request stalled and was aborted' : error.message;
+        sendToRenderer('update-status', 'OpenAI error: ' + message);
     } finally {
         if (stallTimer) clearTimeout(stallTimer);
     }

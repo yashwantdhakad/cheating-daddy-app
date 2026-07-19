@@ -36,6 +36,7 @@ const DEFAULT_PREFERENCES = {
     lmstudioModel: '',
     whisperModel: 'Xenova/whisper-small',
     groqModel: 'llama-3.3-70b-versatile',
+    openaiModel: 'gpt-4o-mini',
     smartClickThrough: false,
     autoCopyClipboard: false,
     vadMode: 'VERY_AGGRESSIVE',
@@ -246,6 +247,11 @@ function getCredentials() {
     } else if (process.env.CLAUDE_API_KEY) {
         decrypted.anthropicApiKey = process.env.CLAUDE_API_KEY;
     }
+    if (process.env.OPENAI_API_KEY) {
+        decrypted.openaiKey = process.env.OPENAI_API_KEY;
+    } else if (process.env.CHATGPT_API_KEY) {
+        decrypted.openaiKey = process.env.CHATGPT_API_KEY;
+    }
 
     return decrypted;
 }
@@ -289,6 +295,14 @@ function getGroqApiKey() {
 
 function setGroqApiKey(groqApiKey) {
     return setCredentials({ groqApiKey });
+}
+
+function getOpenaiApiKey() {
+    return process.env.OPENAI_API_KEY || process.env.CHATGPT_API_KEY || getCredentials().openaiKey || '';
+}
+
+function setOpenaiApiKey(openaiKey) {
+    return setCredentials({ openaiKey });
 }
 
 // ============ PREFERENCES ============
@@ -590,6 +604,8 @@ module.exports = {
     setApiKey,
     getGroqApiKey,
     setGroqApiKey,
+    getOpenaiApiKey,
+    setOpenaiApiKey,
     migrateCredentialsEncryption,
 
     // Preferences
