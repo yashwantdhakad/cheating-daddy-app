@@ -89,16 +89,33 @@ function dispatchTranscription() {
     dispatchToAnswerProvider(text);
 }
 
-// Answer-provider priority: Claude > Groq > Gemma (first configured key wins)
+// Route transcription to the configured active model provider, with fallback to others
 function dispatchToAnswerProvider(text) {
-    if (hasAnthropicKey()) {
+    const storage = require('../storage');
+    const prefs = storage.getPreferences();
+    const activeProvider = prefs.activeAnswerProvider || 'groq';
+
+    if (activeProvider === 'claude' && hasAnthropicKey()) {
         sendToClaude(text);
-    } else if (hasOpenaiKey()) {
+    } else if (activeProvider === 'openai' && hasOpenaiKey()) {
         sendToOpenAI(text);
-    } else if (hasGroqKey()) {
+    } else if (activeProvider === 'gemini' && getApiKey()) {
+        sendToGemma(text);
+    } else if (activeProvider === 'groq' && hasGroqKey()) {
         sendToGroq(text);
     } else {
-        sendToGemma(text);
+        // Fallback in case the active provider is missing its key
+        if (hasAnthropicKey()) {
+            sendToClaude(text);
+        } else if (hasOpenaiKey()) {
+            sendToOpenAI(text);
+        } else if (hasGroqKey()) {
+            sendToGroq(text);
+        } else if (getApiKey()) {
+            sendToGemma(text);
+        } else {
+            console.log('No keys configured for dispatchToAnswerProvider');
+        }
     }
 }
 

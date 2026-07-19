@@ -162,6 +162,21 @@ export class MainView extends LitElement {
             border-color: var(--danger, #ef4444);
         }
 
+        /* Reset type radio and checkbox so general input styles do not mess them up */
+        input[type='radio'],
+        input[type='checkbox'] {
+            width: auto !important;
+            height: auto !important;
+            padding: 0 !important;
+            margin: 0 !important;
+            background: transparent !important;
+            border: none !important;
+            cursor: pointer !important;
+            appearance: auto !important;
+            -webkit-appearance: radio !important;
+            box-shadow: none !important;
+        }
+
         select {
             cursor: pointer;
             appearance: none;
@@ -513,7 +528,8 @@ export class MainView extends LitElement {
         _openaiModel: { state: true },
         _tokenError: { state: true },
         _keyError: { state: true },
-        _useGroqTranscription: { state: true },
+        _activeAnswerProvider: { state: true },
+        _localByokWhisperModel: { state: true },
         _groqModel: { state: true },
         // Local AI state
         _ollamaHost: { state: true },
@@ -550,7 +566,8 @@ export class MainView extends LitElement {
         this._ollamaHost = 'http://127.0.0.1:11434';
         this._ollamaModel = 'llama3.1';
         this._whisperModel = 'Xenova/whisper-small';
-        this._useGroqTranscription = false;
+        this._activeAnswerProvider = 'groq'; // 'groq' | 'claude' | 'openai' | 'gemini'
+        this._localByokWhisperModel = 'Xenova/whisper-small';
         this._groqModel = 'llama-3.3-70b-versatile';
         this._openaiModel = 'gpt-4o-mini';
 
@@ -592,7 +609,8 @@ export class MainView extends LitElement {
             this._lmstudioHost = prefs.lmstudioHost || 'http://127.0.0.1:1234';
             this._lmstudioModel = prefs.lmstudioModel || '';
             this._whisperModel = prefs.whisperModel || 'Xenova/whisper-small';
-            this._useGroqTranscription = prefs.useGroqTranscription || false;
+            this._activeAnswerProvider = prefs.activeAnswerProvider || 'groq';
+            this._localByokWhisperModel = prefs.localByokWhisperModel || 'Xenova/whisper-small';
             this._groqModel = prefs.groqModel || 'llama-3.3-70b-versatile';
             this._openaiModel = prefs.openaiModel || 'gpt-4o-mini';
 
@@ -789,9 +807,16 @@ export class MainView extends LitElement {
         this.requestUpdate();
     }
 
-    async _saveUseGroqTranscription(val) {
-        this._useGroqTranscription = val;
-        await cheatingDaddy.storage.updatePreference('useGroqTranscription', val);
+    async _saveActiveAnswerProvider(val) {
+        this._activeAnswerProvider = val;
+        await cheatingDaddy.storage.updatePreference('activeAnswerProvider', val);
+        this._keyError = false;
+        this.requestUpdate();
+    }
+
+    async _saveLocalByokWhisperModel(val) {
+        this._localByokWhisperModel = val;
+        await cheatingDaddy.storage.updatePreference('localByokWhisperModel', val);
         this.requestUpdate();
     }
 
@@ -895,22 +920,26 @@ export class MainView extends LitElement {
 
     // ── Start ──
 
+    // Returns true if the user has at least one cloud answer-capable key.
+    _hasAnyAnswerKey() {
+        return !!(this._claudeKey.trim() || this._openaiKey.trim() || this._groqKey.trim() || this._geminiKey.trim());
+    }
+
     _handleStart() {
         if (this.isInitializing) return;
 
         if (this._mode === 'byok') {
-            if (this._useGroqTranscription) {
-                if (!this._groqKey.trim()) {
-                    this._keyError = true;
-                    this.requestUpdate();
-                    return;
-                }
-            } else {
-                if (!this._geminiKey.trim()) {
-                    this._keyError = true;
-                    this.requestUpdate();
-                    return;
-                }
+            const provider = this._activeAnswerProvider || 'groq';
+            let hasKey = false;
+            if (provider === 'groq') hasKey = !!this._groqKey.trim();
+            else if (provider === 'claude') hasKey = !!this._claudeKey.trim();
+            else if (provider === 'openai') hasKey = !!this._openaiKey.trim();
+            else if (provider === 'gemini') hasKey = !!this._geminiKey.trim();
+
+            if (!hasKey) {
+                this._keyError = true;
+                this.requestUpdate();
+                return;
             }
         } else if (this._mode === 'local') {
             // Cloud-answer (hybrid) mode only needs the local server for screenshots,
@@ -1011,137 +1040,247 @@ export class MainView extends LitElement {
 
     _renderByokMode() {
         return html`
-            <!-- Primary configuration: Groq (Recommended) -->
+            <!-- Active Provider Selection -->
             <div class="form-group">
-                <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
-                    Groq API Key
-                    <span style="background: var(--primary); color: #fff; font-size: 0.75em; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
-                        >Recommended</span
+                <label class="form-label" style="margin-bottom: 6px;">Active AI Model Provider</label>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <!-- Groq Card -->
+                    <div
+                        style="border: 1px solid ${this._activeAnswerProvider === 'groq' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
                     >
+                        <div
+                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
+                            @click=${() => this._saveActiveAnswerProvider('groq')}
+                        >
+                            <input
+                                type="radio"
+                                name="active-provider"
+                                value="groq"
+                                ?checked=${this._activeAnswerProvider === 'groq'}
+                                style="cursor: pointer;"
+                            />
+                            <span
+                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
+                                >Groq Cloud (Llama 3.3)</span
+                            >
+                            <span
+                                style="background: var(--accent); color: #fff; font-size: 0.7em; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
+                                >Fastest</span
+                            >
+                        </div>
+                        ${
+                            this._activeAnswerProvider === 'groq'
+                                ? html`
+                                      <div
+                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
+                                      >
+                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Groq API Key</label>
+                                          <input
+                                              type="password"
+                                              placeholder="Enter your Groq API key"
+                                              .value=${this._groqKey}
+                                              @input=${e => this._saveGroqKey(e.target.value)}
+                                              class=${this._keyError && !this._groqKey.trim() ? 'error' : ''}
+                                          />
+                                          <div class="form-hint">
+                                              <span class="link" @click=${() => this.onExternalLink('https://console.groq.com/keys')}
+                                                  >Get a free Groq key</span
+                                              >
+                                          </div>
+                                          <div style="margin-top: 6px;">
+                                              <label class="form-label" style="font-size: 10px; opacity: 0.8;">Groq Answer Model</label>
+                                              <select
+                                                  .value=${this._groqModel}
+                                                  @change=${e => this._saveGroqModel(e.target.value)}
+                                                  style="margin-top: 4px;"
+                                              >
+                                                  <option value="llama-3.3-70b-versatile">Llama 3.3 70B (recommended)</option>
+                                                  <option value="llama-3.1-8b-instant">Llama 3.1 8B (fastest)</option>
+                                                  <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                                  <option value="gemma2-9b-it">Gemma 2 9B</option>
+                                              </select>
+                                          </div>
+                                      </div>
+                                  `
+                                : ''
+                        }
+                    </div>
+
+                    <!-- Claude Card -->
+                    <div
+                        style="border: 1px solid ${this._activeAnswerProvider === 'claude' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
+                    >
+                        <div
+                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
+                            @click=${() => this._saveActiveAnswerProvider('claude')}
+                        >
+                            <input
+                                type="radio"
+                                name="active-provider"
+                                value="claude"
+                                ?checked=${this._activeAnswerProvider === 'claude'}
+                                style="cursor: pointer;"
+                            />
+                            <span
+                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
+                                >Anthropic Claude</span
+                            >
+                        </div>
+                        ${
+                            this._activeAnswerProvider === 'claude'
+                                ? html`
+                                      <div
+                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
+                                      >
+                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Claude API Key</label>
+                                          <input
+                                              type="password"
+                                              placeholder="Enter your Claude API key"
+                                              .value=${this._claudeKey}
+                                              @input=${e => this._saveClaudeKey(e.target.value)}
+                                              class=${this._keyError && !this._claudeKey.trim() ? 'error' : ''}
+                                          />
+                                          <div class="form-hint">
+                                              <span class="link" @click=${() => this.onExternalLink('https://platform.claude.com/')}
+                                                  >Get Claude key</span
+                                              >
+                                          </div>
+                                      </div>
+                                  `
+                                : ''
+                        }
+                    </div>
+
+                    <!-- OpenAI Card -->
+                    <div
+                        style="border: 1px solid ${this._activeAnswerProvider === 'openai' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
+                    >
+                        <div
+                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
+                            @click=${() => this._saveActiveAnswerProvider('openai')}
+                        >
+                            <input
+                                type="radio"
+                                name="active-provider"
+                                value="openai"
+                                ?checked=${this._activeAnswerProvider === 'openai'}
+                                style="cursor: pointer;"
+                            />
+                            <span
+                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
+                                >OpenAI ChatGPT</span
+                            >
+                        </div>
+                        ${
+                            this._activeAnswerProvider === 'openai'
+                                ? html`
+                                      <div
+                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
+                                      >
+                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">OpenAI API Key</label>
+                                          <input
+                                              type="password"
+                                              placeholder="Enter your OpenAI API key"
+                                              .value=${this._openaiKey}
+                                              @input=${e => this._saveOpenaiKey(e.target.value)}
+                                              class=${this._keyError && !this._openaiKey.trim() ? 'error' : ''}
+                                          />
+                                          <div class="form-hint">
+                                              <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}
+                                                  >Get OpenAI key</span
+                                              >
+                                          </div>
+                                          <div style="margin-top: 6px;">
+                                              <label class="form-label" style="font-size: 10px; opacity: 0.8;">OpenAI Answer Model</label>
+                                              <select
+                                                  .value=${this._openaiModel}
+                                                  @change=${e => this._saveOpenaiModel(e.target.value)}
+                                                  style="margin-top: 4px;"
+                                              >
+                                                  <option value="gpt-4o-mini">GPT-4o Mini (recommended)</option>
+                                                  <option value="gpt-4o">GPT-4o (highly intelligent)</option>
+                                                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (legacy)</option>
+                                              </select>
+                                          </div>
+                                      </div>
+                                  `
+                                : ''
+                        }
+                    </div>
+
+                    <!-- Gemini Card -->
+                    <div
+                        style="border: 1px solid ${this._activeAnswerProvider === 'gemini' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
+                    >
+                        <div
+                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
+                            @click=${() => this._saveActiveAnswerProvider('gemini')}
+                        >
+                            <input
+                                type="radio"
+                                name="active-provider"
+                                value="gemini"
+                                ?checked=${this._activeAnswerProvider === 'gemini'}
+                                style="cursor: pointer;"
+                            />
+                            <span
+                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
+                                >Google Gemini</span
+                            >
+                        </div>
+                        ${
+                            this._activeAnswerProvider === 'gemini'
+                                ? html`
+                                      <div
+                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
+                                      >
+                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Gemini API Key</label>
+                                          <input
+                                              type="password"
+                                              placeholder="Enter your Gemini API key"
+                                              .value=${this._geminiKey}
+                                              @input=${e => this._saveGeminiKey(e.target.value)}
+                                              class=${this._keyError && !this._geminiKey.trim() ? 'error' : ''}
+                                          />
+                                          <div class="form-hint">
+                                              <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}
+                                                  >Get Gemini key</span
+                                              >
+                                          </div>
+                                      </div>
+                                  `
+                                : ''
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- On-Device Local Whisper Configuration -->
+            <div class="form-group" style="margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border);">
+                <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
+                    Local Whisper Model (On-Device Transcription) ${this.whisperDownloading ? html`<div class="whisper-spinner"></div>` : ''}
                 </label>
-                <input
-                    type="password"
-                    .placeholder=${this._useGroqTranscription ? 'Required for free transcription & answers' : 'Optional'}
-                    .value=${this._groqKey}
-                    @input=${e => this._saveGroqKey(e.target.value)}
-                    class=${this._keyError && this._useGroqTranscription ? 'error' : ''}
-                />
-                <div class="form-hint">
-                    Uses Groq's high-speed engines.
-                    <span class="link" @click=${() => this.onExternalLink('https://console.groq.com/keys')}>Get a free Groq key</span>
-                </div>
-            </div>
-
-            <div class="form-group" style="margin-top: 10px; display: flex; align-items: center; gap: 8px;">
-                <input
-                    type="checkbox"
-                    id="use-groq-transcription"
-                    ?checked=${this._useGroqTranscription}
-                    @change=${e => this._saveUseGroqTranscription(e.target.checked)}
-                    style="width: auto; margin: 0; cursor: pointer;"
-                />
-                <label for="use-groq-transcription" style="margin: 0; cursor: pointer; font-size: 0.9em; user-select: none; font-weight: 500;">
-                    Use Groq Whisper Cloud for fast transcription (No Gemini key needed)
-                </label>
-            </div>
-
-            <!-- Groq Model Selector -->
-            ${
-                this._groqKey.trim() || this._useGroqTranscription
-                    ? html`
-                          <div class="form-group">
-                              <label class="form-label">Groq Answer Model</label>
-                              <select .value=${this._groqModel} @change=${e => this._saveGroqModel(e.target.value)}>
-                                  <option value="llama-3.3-70b-versatile" ?selected=${this._groqModel === 'llama-3.3-70b-versatile'}>
-                                      Llama 3.3 70B (recommended)
-                                  </option>
-                                  <option value="llama-3.1-8b-instant" ?selected=${this._groqModel === 'llama-3.1-8b-instant'}>
-                                      Llama 3.1 8B (fastest)
-                                  </option>
-                                  <option value="mixtral-8x7b-32768" ?selected=${this._groqModel === 'mixtral-8x7b-32768'}>Mixtral 8x7B</option>
-                                  <option value="gemma2-9b-it" ?selected=${this._groqModel === 'gemma2-9b-it'}>Gemma 2 9B</option>
-                              </select>
-                          </div>
-                      `
-                    : ''
-            }
-
-            <!-- Fallback Section -->
-            <div style="margin: 25px 0 15px 0; border-top: 1px dashed var(--border); padding-top: 15px;">
-                <h4 style="margin: 0 0 5px 0; font-size: 0.95em; color: var(--text-muted); font-weight: 600;">Alternative / Fallback Models</h4>
-                <p style="margin: 0; font-size: 0.8em; color: var(--text-muted);">
-                    Configure these if you want to use Anthropic's Claude, OpenAI's ChatGPT, or Google's Gemini instead of Groq.
-                </p>
-            </div>
-
-            <!-- Claude API Key -->
-            <div class="form-group">
-                <label class="form-label">Claude API Key (Optional)</label>
-                <input
-                    type="password"
-                    placeholder="Optional - replaces Groq for answers when set"
-                    .value=${this._claudeKey}
-                    @input=${e => this._saveClaudeKey(e.target.value)}
-                />
-                <div class="form-hint">
-                    Uses Claude for higher-quality answers.
-                    <span class="link" @click=${() => this.onExternalLink('https://platform.claude.com/')}>Get Claude key</span>
-                </div>
-            </div>
-
-            <!-- OpenAI API Key -->
-            <div class="form-group">
-                <label class="form-label">OpenAI API Key (Optional)</label>
-                <input
-                    type="password"
-                    placeholder="Optional - replaces Groq for answers when set"
-                    .value=${this._openaiKey}
-                    @input=${e => this._saveOpenaiKey(e.target.value)}
-                />
-                <div class="form-hint">
-                    Uses ChatGPT (OpenAI) for answers.
-                    <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}>Get OpenAI key</span>
-                </div>
-            </div>
-
-            <!-- OpenAI Model Selector -->
-            ${
-                this._openaiKey.trim()
-                    ? html`
-                          <div class="form-group">
-                              <label class="form-label">OpenAI Answer Model</label>
-                              <select .value=${this._openaiModel} @change=${e => this._saveOpenaiModel(e.target.value)}>
-                                  <option value="gpt-4o-mini" ?selected=${this._openaiModel === 'gpt-4o-mini'}>
-                                      GPT-4o Mini (recommended, fast & cheap)
-                                  </option>
-                                  <option value="gpt-4o" ?selected=${this._openaiModel === 'gpt-4o'}>GPT-4o (highly intelligent)</option>
-                                  <option value="gpt-4-turbo" ?selected=${this._openaiModel === 'gpt-4-turbo'}>GPT-4 Turbo</option>
-                                  <option value="gpt-3.5-turbo" ?selected=${this._openaiModel === 'gpt-3.5-turbo'}>GPT-3.5 Turbo (legacy)</option>
-                              </select>
-                          </div>
-                      `
-                    : ''
-            }
-
-            <!-- Gemini API Key -->
-            <div class="form-group">
-                <label class="form-label">Gemini API Key (Optional)</label>
-                <input
-                    type="password"
-                    .placeholder=${this._useGroqTranscription ? 'Optional - only used if not using Groq Whisper' : 'Required'}
-                    .value=${this._geminiKey}
-                    @input=${e => this._saveGeminiKey(e.target.value)}
-                    class=${this._keyError && !this._useGroqTranscription ? 'error' : ''}
-                />
-                <div class="form-hint">
-                    Only needed if you uncheck "Use Groq Whisper" above.
-                    <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}>Get Gemini key</span>
+                <select
+                    .value=${this._localByokWhisperModel}
+                    @change=${e => this._saveLocalByokWhisperModel(e.target.value)}
+                    style="margin-top: 4px;"
+                >
+                    <option value="Xenova/whisper-tiny">Tiny (~40 MB, fastest)</option>
+                    <option value="Xenova/whisper-base">Base (~75 MB)</option>
+                    <option value="Xenova/whisper-small">Small (~250 MB, recommended)</option>
+                    <option value="Xenova/whisper-medium">Medium (~780 MB, most accurate)</option>
+                </select>
+                <div class="form-hint" style="margin-top: 4px;">
+                    ${
+                        this.whisperDownloading
+                            ? html`<span style="color: var(--accent); font-weight: 500;">⏳ Downloading model...</span>`
+                            : 'Audio transcription runs 100% locally on your machine.'
+                    }
                 </div>
             </div>
 
             ${this._renderStartButton()} ${this._renderDivider()}
-
-            <!-- Cloud promo intentionally removed from the active UI. -->
 
             <div class="mode-links">
                 <button class="mode-link" @click=${() => this._saveMode('local')}>Use local AI</button>

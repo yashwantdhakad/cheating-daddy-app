@@ -338,7 +338,7 @@ export class CustomizeView extends LitElement {
             { key: 'moveRight', name: 'Move Window Right', description: 'Move the app window right' },
             { key: 'toggleVisibility', name: 'Toggle Visibility', description: 'Show or hide the app window' },
             { key: 'toggleClickThrough', name: 'Toggle Click-through', description: 'Enable or disable click-through mode' },
-            { key: 'minimizeWindow', name: 'Minimize / Restore Window', description: 'Minimize the window or restore it' },
+            { key: 'minimizeWindow', name: 'Hide / Show Window', description: 'Fully hide the window from the taskbar and Task Manager (same as the Hide button). Press again to bring it back.' },
             { key: 'nextStep', name: 'Ask Next Step', description: 'Take screenshot and ask for next step' },
             { key: 'previousResponse', name: 'Previous Response', description: 'Move to previous AI response' },
             { key: 'nextResponse', name: 'Next Response', description: 'Move to next AI response' },

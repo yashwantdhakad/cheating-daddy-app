@@ -168,10 +168,10 @@ async function initializeLocal(profile = 'interview') {
     const customPrompt = prefs.customPrompt || '';
     let answerMode = prefs.localAnswerMode || 'local';
 
-    // Override if we are in BYOK mode but using Groq transcription
+    // In BYOK mode, always run Whisper locally on-device and send answers to the cloud
     const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
-    if (providerMode === 'byok' && prefs.useGroqTranscription) {
-        whisperModel = 'groq-api';
+    if (providerMode === 'byok') {
+        whisperModel = prefs.localByokWhisperModel || 'Xenova/whisper-small';
         answerMode = 'cloud';
         host = '';
         model = '';

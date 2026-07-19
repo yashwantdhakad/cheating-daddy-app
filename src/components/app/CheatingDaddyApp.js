@@ -675,27 +675,16 @@ export class CheatingDaddyApp extends LitElement {
                 return;
             }
         } else {
-            // BYOK mode: either Groq Whisper or Gemini Live
-            if (prefs.useGroqTranscription) {
-                const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
-                if (!success) {
-                    const mainView = this.shadowRoot.querySelector('main-view');
-                    if (mainView && mainView.triggerApiKeyError) {
-                        mainView.triggerApiKeyError();
-                    }
-                    return;
+            // BYOK mode: always run local Whisper + Cloud Answers.
+            // initializeLocal() will configure Whisper to run locally on-device,
+            // and dispatch answers to the selected active provider.
+            const success = await cheatingDaddy.initializeLocal(this.selectedProfile);
+            if (!success) {
+                const mainView = this.shadowRoot.querySelector('main-view');
+                if (mainView && mainView.triggerApiKeyError) {
+                    mainView.triggerApiKeyError();
                 }
-            } else {
-                const apiKey = await cheatingDaddy.storage.getApiKey();
-                if (!apiKey || apiKey === '') {
-                    const mainView = this.shadowRoot.querySelector('main-view');
-                    if (mainView && mainView.triggerApiKeyError) {
-                        mainView.triggerApiKeyError();
-                    }
-                    return;
-                }
-
-                await cheatingDaddy.initializeGemini(this.selectedProfile, this.selectedLanguage);
+                return;
             }
         }
 

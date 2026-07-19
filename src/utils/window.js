@@ -191,14 +191,18 @@ function updateGlobalShortcuts(keybinds, mainWindow, sendToRenderer, geminiSessi
         }
     }
 
-    // Register minimize window shortcut
+    // Register minimize/hide window shortcut.
+    // Uses hide() rather than minimize() so the app is fully invisible in the
+    // OS task manager / Mission Control - same behaviour as the "Hide" button
+    // in the header. showInactive() brings it back without stealing focus.
     if (keybinds.minimizeWindow) {
         try {
             globalShortcut.register(keybinds.minimizeWindow, () => {
-                if (mainWindow.isMinimized()) {
-                    mainWindow.restore();
+                if (mainWindow.isDestroyed()) return;
+                if (mainWindow.isVisible()) {
+                    mainWindow.hide();
                 } else {
-                    mainWindow.minimize();
+                    mainWindow.showInactive();
                 }
             });
             console.log(`Registered minimizeWindow: ${keybinds.minimizeWindow}`);
