@@ -89,32 +89,47 @@ function dispatchTranscription() {
     dispatchToAnswerProvider(text);
 }
 
-// Route transcription to the configured active model provider, with fallback to others
+// Route transcription to the configured active model provider, with fallback to others.
+// getPreferences() is a synchronous fs.readFileSync call — safe to call inline here.
 function dispatchToAnswerProvider(text) {
-    const storage = require('../storage');
-    const prefs = storage.getPreferences();
-    const activeProvider = prefs.activeAnswerProvider || 'groq';
+    const prefs = getPreferences();
+    let activeProvider = prefs.activeAnswerProvider || 'groq';
 
-    if (activeProvider === 'claude' && hasAnthropicKey()) {
-        sendToClaude(text);
-    } else if (activeProvider === 'openai' && hasOpenaiKey()) {
-        sendToOpenAI(text);
-    } else if (activeProvider === 'gemini' && getApiKey()) {
-        sendToGemma(text);
-    } else if (activeProvider === 'groq' && hasGroqKey()) {
-        sendToGroq(text);
-    } else {
-        // Fallback in case the active provider is missing its key
+    // Handle invalid values like 'groq,openai' gracefully
+    if (activeProvider.includes(',')) {
+        activeProvider = activeProvider.split(',')[0].trim();
+    }
+    if (!['groq', 'openai', 'claude', 'gemini'].includes(activeProvider)) {
+        activeProvider = 'groq';
+    }
+
+    if (activeProvider === 'claude') {
         if (hasAnthropicKey()) {
             sendToClaude(text);
-        } else if (hasOpenaiKey()) {
+        } else {
+            sendToRenderer('new-response', '⚠️ Claude Error: No API key configured. Please enter your Anthropic API key in Settings.');
+            sendToRenderer('update-status', 'Claude error: missing API key');
+        }
+    } else if (activeProvider === 'openai') {
+        if (hasOpenaiKey()) {
             sendToOpenAI(text);
-        } else if (hasGroqKey()) {
+        } else {
+            sendToRenderer('new-response', '⚠️ OpenAI Error: No API key configured. Please enter your OpenAI API key in Settings.');
+            sendToRenderer('update-status', 'OpenAI error: missing API key');
+        }
+    } else if (activeProvider === 'groq') {
+        if (hasGroqKey()) {
             sendToGroq(text);
-        } else if (getApiKey()) {
+        } else {
+            sendToRenderer('new-response', '⚠️ Groq Error: No API key configured. Please enter your Groq API key in Settings.');
+            sendToRenderer('update-status', 'Groq error: missing API key');
+        }
+    } else if (activeProvider === 'gemini') {
+        if (getApiKey()) {
             sendToGemma(text);
         } else {
-            console.log('No keys configured for dispatchToAnswerProvider');
+            sendToRenderer('new-response', '⚠️ Gemini Error: No API key configured. Please enter your Gemini API key in Settings.');
+            sendToRenderer('update-status', 'Gemini error: missing API key');
         }
     }
 }
@@ -375,6 +390,7 @@ async function sendToClaude(transcription) {
         sendToRenderer('update-status', 'Listening...');
     } catch (error) {
         console.error('Error calling Claude API:', error);
+        sendToRenderer('new-response', `⚠️ Claude Error: ${error.message}`);
         sendToRenderer('update-status', 'Claude error: ' + error.message);
     }
 }
@@ -457,7 +473,15 @@ async function sendToGroq(transcription) {
 
         if (!response.ok) {
             const errorText = await response.text();
+            let parsedError = errorText;
+            try {
+                const parsed = JSON.parse(errorText);
+                parsedError = parsed.error?.message || errorText;
+            } catch (e) {}
+            // Clean up URLs to prevent accidental clicks
+            parsedError = parsedError.replace(/https?:\/\/\S+/g, '').replace(/\s+You can find your API key at\s*\.?$/i, '');
             console.error('Groq API error:', response.status, errorText);
+            sendToRenderer('new-response', `⚠️ Groq Error (${response.status}): ${parsedError.trim()}`);
             sendToRenderer('update-status', `Groq error: ${response.status}`);
             return;
         }
@@ -531,6 +555,7 @@ async function sendToGroq(transcription) {
     } catch (error) {
         console.error('Error calling Groq API:', error);
         const message = error.name === 'AbortError' ? 'request stalled and was aborted' : error.message;
+        sendToRenderer('new-response', `⚠️ Groq Error: ${message}`);
         sendToRenderer('update-status', 'Groq error: ' + message);
     } finally {
         if (stallTimer) clearTimeout(stallTimer);
@@ -593,7 +618,15 @@ async function sendToOpenAI(transcription) {
 
         if (!response.ok) {
             const errorText = await response.text();
+            let parsedError = errorText;
+            try {
+                const parsed = JSON.parse(errorText);
+                parsedError = parsed.error?.message || errorText;
+            } catch (e) {}
+            // Clean up URLs to prevent accidental clicks
+            parsedError = parsedError.replace(/https?:\/\/\S+/g, '').replace(/\s+You can find your API key at\s*\.?$/i, '');
             console.error('OpenAI API error:', response.status, errorText);
+            sendToRenderer('new-response', `⚠️ OpenAI Error (${response.status}): ${parsedError.trim()}`);
             sendToRenderer('update-status', `OpenAI error: ${response.status}`);
             return;
         }
@@ -666,6 +699,7 @@ async function sendToOpenAI(transcription) {
     } catch (error) {
         console.error('Error calling OpenAI API:', error);
         const message = error.name === 'AbortError' ? 'request stalled and was aborted' : error.message;
+        sendToRenderer('new-response', `⚠️ OpenAI Error: ${message}`);
         sendToRenderer('update-status', 'OpenAI error: ' + message);
     } finally {
         if (stallTimer) clearTimeout(stallTimer);
@@ -759,6 +793,7 @@ async function sendToGemma(transcription) {
         sendToRenderer('update-status', 'Listening...');
     } catch (error) {
         console.error('Error calling Gemma API:', error);
+        sendToRenderer('new-response', `⚠️ Gemini Error: ${error.message}`);
         sendToRenderer('update-status', 'Gemma error: ' + error.message);
     }
 }
@@ -1399,6 +1434,13 @@ function setupGeminiIpcHandlers(geminiSessionRef) {
 
         if (currentProviderMode === 'local') {
             try {
+                // If local session is running in hybrid/cloud-answer mode (BYOK),
+                // route manual text queries to the cloud provider, not Ollama.
+                if (getLocalAi().getLocalAnswerMode() === 'cloud') {
+                    console.log('Sending text to cloud answer provider:', text);
+                    dispatchToAnswerProvider(text.trim());
+                    return { success: true };
+                }
                 console.log('Sending text to local Ollama:', text);
                 return await getLocalAi().sendLocalText(text.trim());
             } catch (error) {

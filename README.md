@@ -18,43 +18,54 @@ A real-time AI assistant that provides contextual help during video calls, inter
 
 ## Features
 
-- **Live AI Assistance**: Real-time help powered by Google Gemini 2.0 Flash Live
-- **Screen & Audio Capture**: Analyzes what you see and hear for contextual responses
-- **Multiple Profiles**: Interview, Sales Call, Business Meeting, Presentation, Negotiation
-- **Transparent Overlay**: Always-on-top window that can be positioned anywhere
-- **Click-through Mode**: Make window transparent to clicks when needed
-- **Cross-platform**: Works on macOS, Windows, and Linux (kinda, dont use, just for testing rn)
+- **On-Device Whisper Transcription**: Transcribe audio 100% locally and privately (no API costs, no third-party transcription endpoints). Supports different model sizes (Tiny/Base/Small/Medium).
+- **Multiple AI Providers (BYOK)**: Supports Anthropic Claude, OpenAI ChatGPT, Google Gemini, and Groq Cloud for answering questions. Simple selection card interface.
+- **Screen & Audio Capture**: Analyzes what you see and hear for contextual responses.
+- **Multiple Profiles**: Interview, Sales Call, Business Meeting, Presentation, Negotiation.
+- **Transparent Overlay**: Always-on-top window that can be positioned anywhere.
+- **Click-through Mode (Ghost Mode)**: Make window transparent to clicks when needed.
+- **Panic Hide**: Fully hide the window from the dock, taskbar, Mission Control, Alt+Tab, and Task Manager processes with a single keybind.
+- **Emergency Erase**: Clear all overlay text instantly.
 
 ## Setup
 
-1. **Get a Gemini API Key**: Visit [Google AI Studio](https://aistudio.google.com/apikey)
-2. **Install Dependencies**: `npm install`
-3. **Run the App**: `npm start`
+1. **Install Dependencies**: `npm install`
+2. **Run the App**: `npm start`
+3. **Choose Mode**:
+    - **BYOK (Bring Your Own Keys)**: Choose your active provider (Groq, Claude, OpenAI, or Gemini), enter the API key, and configure model options. Audio is transcribed 100% locally using Whisper.
+    - **Local AI**: Connect to a local Ollama or LM Studio instance for fully offline/private processing.
 
-## Usage
+## Configuration & Environment Variables
 
-1. Enter your Gemini API key in the main window
-2. Choose your profile and language in settings
-3. Click "Start Session" to begin
-4. Position the window using keyboard shortcuts
-5. The AI will provide real-time assistance based on your screen and what interview asks
+The application supports loading configuration defaults via a `.env` file located in the project root. Copy `.env.example` to `.env` to customize:
+
+- **`ENABLED_PROVIDERS`**: Comma-separated list of visible providers (e.g. `groq,openai` to show only Groq and ChatGPT).
+- **`GROQ_API_KEY`**, **`OPENAI_API_KEY`**, etc.: Pre-load API keys so they are active automatically.
+- **`ACTIVE_ANSWER_PROVIDER`**: Pre-select the active provider on startup (e.g. `groq` or `openai`).
+- **`GROQ_MODEL`**, **`OPENAI_MODEL`**: Override default model selections.
 
 ## Keyboard Shortcuts
 
-- **Window Movement**: `Ctrl/Cmd + Arrow Keys` - Move window
-- **Click-through**: `Ctrl/Cmd + M` - Toggle mouse events
-- **Close/Back**: `Ctrl/Cmd + \` - Close window or go back
-- **Send Message**: `Enter` - Send text to AI
+The app supports custom global shortcuts (configurable in Settings → Shortcuts). Defaults are:
+
+- **Hide / Show Window**: `Cmd+Shift+H` (macOS) / `Ctrl+Shift+H` (Windows) - Fully hide the window from taskbar and task managers. Press again to restore.
+- **Toggle Visibility**: `Cmd+\` (macOS) / `Ctrl+\` (Windows) - Show or hide the window.
+- **Click-through (Ghost Mode)**: `Cmd+M` (macOS) / `Ctrl+M` (Windows) - Toggle mouse event pass-through.
+- **Emergency Erase**: `Cmd+Shift+E` (macOS) / `Ctrl+Shift+E` (Windows) - Wipe all AI content on screen instantly.
+- **Ask Next Step**: `Cmd+Enter` (macOS) / `Ctrl+Enter` (Windows) - Take screenshot and query the model for the next step.
+- **Window Movement**: `Alt + Arrow Keys` (macOS) / `Ctrl + Arrow Keys` (Windows) - Shift the overlay window position.
+- **Scroll AI Responses**: `Cmd+Shift+Up/Down` (macOS) / `Ctrl+Shift+Up/Down` (Windows) - Scroll content in ghost mode.
+- **Switch Responses**: `Cmd+[` / `Cmd+]` (macOS) - Cycle through response history.
 
 ## Audio Capture
 
-- **macOS**: [SystemAudioDump](https://github.com/Mohammed-Yasin-Mulla/Sound) for system audio
-- **Windows**: Loopback audio capture
+- **macOS**: SystemAudioDump for system audio capture
+- **Windows**: Loopback WASAPI audio capture
 - **Linux**: Microphone input
 
 ## Requirements
 
 - Electron-compatible OS (macOS, Windows, Linux)
-- Gemini API key
+- An active API key (Groq, Claude, OpenAI, or Gemini) or a running local inference server (Ollama/LM Studio)
 - Screen recording permissions
 - Microphone/audio permissions

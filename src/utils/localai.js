@@ -714,7 +714,7 @@ async function initializeLocalSession(host, model, whisperModel, profile, custom
         // answers, so an unreachable server is a warning, not a failure.
         const serverOptional = answerMode === 'cloud';
 
-        if (!host || !host.trim()) {
+        if (!host || !host.trim() || backend === 'byok') {
             ollamaClient = null;
             console.log('[LocalAI] No local server host provided (running in cloud-only mode)');
         } else if (backend === 'lmstudio') {
@@ -1076,7 +1076,10 @@ function updateActiveProfile(profile) {
     const prefs = storage.getPreferences();
     const customPrompt = prefs.customPrompt || '';
     currentSystemPrompt = getSystemPrompt(profile, customPrompt, false);
-    console.log('[LocalAI] Live session system prompt updated for profile:', profile);
+}
+
+function getLocalAnswerMode() {
+    return localAnswerMode;
 }
 
 module.exports = {
@@ -1088,6 +1091,7 @@ module.exports = {
     sendLocalImage,
     listLocalModels,
     updateActiveProfile,
+    getLocalAnswerMode,
     // Exposed for unit tests only
     _internals: {
         resample24kTo16k,

@@ -529,6 +529,8 @@ export class MainView extends LitElement {
         _tokenError: { state: true },
         _keyError: { state: true },
         _activeAnswerProvider: { state: true },
+        _enabledProviders: { state: true },
+        _transcriptionSource: { state: true },
         _localByokWhisperModel: { state: true },
         _groqModel: { state: true },
         // Local AI state
@@ -566,7 +568,9 @@ export class MainView extends LitElement {
         this._ollamaHost = 'http://127.0.0.1:11434';
         this._ollamaModel = 'llama3.1';
         this._whisperModel = 'Xenova/whisper-small';
-        this._activeAnswerProvider = 'groq'; // 'groq' | 'claude' | 'openai' | 'gemini'
+        this._activeAnswerProvider = 'groq';
+        this._enabledProviders = ['groq', 'openai']; // controlled by ENABLED_PROVIDERS in .env
+        this._transcriptionSource = 'groq';
         this._localByokWhisperModel = 'Xenova/whisper-small';
         this._groqModel = 'llama-3.3-70b-versatile';
         this._openaiModel = 'gpt-4o-mini';
@@ -594,7 +598,7 @@ export class MainView extends LitElement {
                 await cheatingDaddy.storage.updatePreference('providerMode', this._mode);
             }
 
-            // Load keys
+            // Load keys (env vars are returned by getApiKey/getGroqApiKey/getCredentials)
             this._token = creds.cloudToken || '';
             this._geminiKey = (await cheatingDaddy.storage.getApiKey().catch(() => '')) || '';
             this._groqKey = (await cheatingDaddy.storage.getGroqApiKey().catch(() => '')) || '';
@@ -609,10 +613,37 @@ export class MainView extends LitElement {
             this._lmstudioHost = prefs.lmstudioHost || 'http://127.0.0.1:1234';
             this._lmstudioModel = prefs.lmstudioModel || '';
             this._whisperModel = prefs.whisperModel || 'Xenova/whisper-small';
-            this._activeAnswerProvider = prefs.activeAnswerProvider || 'groq';
             this._localByokWhisperModel = prefs.localByokWhisperModel || 'Xenova/whisper-small';
             this._groqModel = prefs.groqModel || 'llama-3.3-70b-versatile';
             this._openaiModel = prefs.openaiModel || 'gpt-4o-mini';
+
+            // Load enabled providers (from .env ENABLED_PROVIDERS or saved pref)
+            const enabledStr = prefs.enabledProviders || 'groq,openai';
+            this._enabledProviders = enabledStr
+                .split(',')
+                .map(s => s.trim().toLowerCase())
+                .filter(s => ['groq', 'openai', 'claude', 'gemini'].includes(s));
+            if (this._enabledProviders.length === 0) this._enabledProviders = ['groq', 'openai'];
+
+            // Active provider: honour saved pref if it's in the enabled list,
+            // otherwise pick first enabled provider.
+            const savedProvider = prefs.activeAnswerProvider;
+            if (savedProvider && this._enabledProviders.includes(savedProvider)) {
+                this._activeAnswerProvider = savedProvider;
+            } else {
+                this._activeAnswerProvider = this._enabledProviders[0] || 'groq';
+            }
+
+            // Transcription source is derived from the active provider:
+            // Groq is active → use Groq cloud Whisper (no download).
+            // Any other provider → use local on-device Whisper.
+            // User can override by saving transcriptionSource = 'local' explicitly.
+            const savedSource = prefs.transcriptionSource;
+            if (this._activeAnswerProvider === 'groq' && savedSource !== 'local') {
+                this._transcriptionSource = 'groq';
+            } else {
+                this._transcriptionSource = 'local';
+            }
 
             this.requestUpdate();
 
@@ -809,14 +840,45 @@ export class MainView extends LitElement {
 
     async _saveActiveAnswerProvider(val) {
         this._activeAnswerProvider = val;
+        // Transcription source automatically follows the active provider
+        this._transcriptionSource = val === 'groq' ? 'groq' : 'local';
         await cheatingDaddy.storage.updatePreference('activeAnswerProvider', val);
+        await cheatingDaddy.storage.updatePreference('transcriptionSource', this._transcriptionSource);
         this._keyError = false;
         this.requestUpdate();
+    }
+
+    async _saveEnabledProviders(list) {
+        this._enabledProviders = list;
+        await cheatingDaddy.storage.updatePreference('enabledProviders', list.join(','));
+        // If the active provider was just disabled, switch to first enabled
+        if (!list.includes(this._activeAnswerProvider) && list.length > 0) {
+            await this._saveActiveAnswerProvider(list[0]);
+        }
+        this.requestUpdate();
+    }
+
+    async _toggleProvider(p) {
+        const current = [...this._enabledProviders];
+        const idx = current.indexOf(p);
+        if (idx >= 0) {
+            if (current.length === 1) return; // always keep at least one enabled
+            current.splice(idx, 1);
+        } else {
+            current.push(p);
+        }
+        await this._saveEnabledProviders(current);
     }
 
     async _saveLocalByokWhisperModel(val) {
         this._localByokWhisperModel = val;
         await cheatingDaddy.storage.updatePreference('localByokWhisperModel', val);
+        this.requestUpdate();
+    }
+
+    async _saveTranscriptionSource(val) {
+        this._transcriptionSource = val;
+        await cheatingDaddy.storage.updatePreference('transcriptionSource', val);
         this.requestUpdate();
     }
 
@@ -1039,247 +1101,256 @@ export class MainView extends LitElement {
     // ── BYOK mode ──
 
     _renderByokMode() {
+        // All four providers — only those in _enabledProviders are rendered
+        const ALL_PROVIDERS = [
+            {
+                id: 'groq',
+                label: 'Groq',
+                sub: 'Llama 3.3 · Fastest · Free tier',
+                badge: '⚡ Free',
+                badgeColor: '#22c55e',
+                link: 'https://console.groq.com/keys',
+                linkLabel: 'Get free key',
+                keyGetter: () => this._groqKey,
+                keySetter: v => this._saveGroqKey(v),
+                keyPlaceholder: 'gsk_…',
+                keyClass: () => (this._keyError && this._activeAnswerProvider === 'groq' && !this._groqKey.trim() ? 'error' : ''),
+                extra: isActive =>
+                    isActive
+                        ? html`<div style="margin-top:8px;">
+                              <label class="form-label" style="font-size:10px;opacity:0.8;">Answer Model</label>
+                              <select
+                                  .value=${this._groqModel}
+                                  @change=${e => this._saveGroqModel(e.target.value)}
+                                  style="margin-top:4px;"
+                                  @click=${e => e.stopPropagation()}
+                              >
+                                  <option value="llama-3.3-70b-versatile">Llama 3.3 70B (recommended)</option>
+                                  <option value="llama-3.1-8b-instant">Llama 3.1 8B (fastest)</option>
+                                  <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+                                  <option value="gemma2-9b-it">Gemma 2 9B</option>
+                              </select>
+                          </div>`
+                        : '',
+            },
+            {
+                id: 'openai',
+                label: 'OpenAI ChatGPT',
+                sub: 'GPT-4o · Most capable',
+                badge: null,
+                link: 'https://platform.openai.com/api-keys',
+                linkLabel: 'Get key',
+                keyGetter: () => this._openaiKey,
+                keySetter: v => this._saveOpenaiKey(v),
+                keyPlaceholder: 'sk-…',
+                keyClass: () => (this._keyError && this._activeAnswerProvider === 'openai' && !this._openaiKey.trim() ? 'error' : ''),
+                extra: isActive =>
+                    isActive
+                        ? html`<div style="margin-top:8px;">
+                              <label class="form-label" style="font-size:10px;opacity:0.8;">Answer Model</label>
+                              <select
+                                  .value=${this._openaiModel}
+                                  @change=${e => this._saveOpenaiModel(e.target.value)}
+                                  style="margin-top:4px;"
+                                  @click=${e => e.stopPropagation()}
+                              >
+                                  <option value="gpt-4o-mini">GPT-4o Mini (recommended)</option>
+                                  <option value="gpt-4o">GPT-4o</option>
+                                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (legacy)</option>
+                              </select>
+                          </div>`
+                        : '',
+            },
+            {
+                id: 'claude',
+                label: 'Anthropic Claude',
+                sub: 'Claude 3.5 Sonnet · Smart',
+                badge: null,
+                link: 'https://platform.claude.com/',
+                linkLabel: 'Get key',
+                keyGetter: () => this._claudeKey,
+                keySetter: v => this._saveClaudeKey(v),
+                keyPlaceholder: 'sk-ant-…',
+                keyClass: () => (this._keyError && this._activeAnswerProvider === 'claude' && !this._claudeKey.trim() ? 'error' : ''),
+                extra: () => '',
+            },
+            {
+                id: 'gemini',
+                label: 'Google Gemini',
+                sub: 'Gemma · Free via AI Studio',
+                badge: null,
+                link: 'https://aistudio.google.com/apikey',
+                linkLabel: 'Get free key',
+                keyGetter: () => this._geminiKey,
+                keySetter: v => this._saveGeminiKey(v),
+                keyPlaceholder: 'AIza…',
+                keyClass: () => (this._keyError && this._activeAnswerProvider === 'gemini' && !this._geminiKey.trim() ? 'error' : ''),
+                extra: () => '',
+            },
+        ];
+
+        const enabled = ALL_PROVIDERS.filter(p => this._enabledProviders.includes(p.id));
+        const disabled = ALL_PROVIDERS.filter(p => !this._enabledProviders.includes(p.id));
+        const needsLocalWhisper = this._activeAnswerProvider !== 'groq';
+
         return html`
-            <!-- Active Provider Selection -->
+            <!-- Provider cards -->
             <div class="form-group">
-                <label class="form-label" style="margin-bottom: 6px;">Active AI Model Provider</label>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
-                    <!-- Groq Card -->
-                    <div
-                        style="border: 1px solid ${this._activeAnswerProvider === 'groq' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
-                    >
-                        <div
-                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
-                            @click=${() => this._saveActiveAnswerProvider('groq')}
-                        >
-                            <input
-                                type="radio"
-                                name="active-provider"
-                                value="groq"
-                                ?checked=${this._activeAnswerProvider === 'groq'}
-                                style="cursor: pointer;"
-                            />
-                            <span
-                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
-                                >Groq Cloud (Llama 3.3)</span
-                            >
-                            <span
-                                style="background: var(--accent); color: #fff; font-size: 0.7em; padding: 2px 6px; border-radius: 4px; font-weight: bold;"
-                                >Fastest</span
-                            >
-                        </div>
-                        ${
-                            this._activeAnswerProvider === 'groq'
-                                ? html`
-                                      <div
-                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
-                                      >
-                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Groq API Key</label>
-                                          <input
-                                              type="password"
-                                              placeholder="Enter your Groq API key"
-                                              .value=${this._groqKey}
-                                              @input=${e => this._saveGroqKey(e.target.value)}
-                                              class=${this._keyError && !this._groqKey.trim() ? 'error' : ''}
-                                          />
-                                          <div class="form-hint">
-                                              <span class="link" @click=${() => this.onExternalLink('https://console.groq.com/keys')}
-                                                  >Get a free Groq key</span
-                                              >
-                                          </div>
-                                          <div style="margin-top: 6px;">
-                                              <label class="form-label" style="font-size: 10px; opacity: 0.8;">Groq Answer Model</label>
-                                              <select
-                                                  .value=${this._groqModel}
-                                                  @change=${e => this._saveGroqModel(e.target.value)}
-                                                  style="margin-top: 4px;"
-                                              >
-                                                  <option value="llama-3.3-70b-versatile">Llama 3.3 70B (recommended)</option>
-                                                  <option value="llama-3.1-8b-instant">Llama 3.1 8B (fastest)</option>
-                                                  <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
-                                                  <option value="gemma2-9b-it">Gemma 2 9B</option>
-                                              </select>
-                                          </div>
-                                      </div>
-                                  `
-                                : ''
-                        }
-                    </div>
-
-                    <!-- Claude Card -->
-                    <div
-                        style="border: 1px solid ${this._activeAnswerProvider === 'claude' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
-                    >
-                        <div
-                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
-                            @click=${() => this._saveActiveAnswerProvider('claude')}
-                        >
-                            <input
-                                type="radio"
-                                name="active-provider"
-                                value="claude"
-                                ?checked=${this._activeAnswerProvider === 'claude'}
-                                style="cursor: pointer;"
-                            />
-                            <span
-                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
-                                >Anthropic Claude</span
-                            >
-                        </div>
-                        ${
-                            this._activeAnswerProvider === 'claude'
-                                ? html`
-                                      <div
-                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
-                                      >
-                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Claude API Key</label>
-                                          <input
-                                              type="password"
-                                              placeholder="Enter your Claude API key"
-                                              .value=${this._claudeKey}
-                                              @input=${e => this._saveClaudeKey(e.target.value)}
-                                              class=${this._keyError && !this._claudeKey.trim() ? 'error' : ''}
-                                          />
-                                          <div class="form-hint">
-                                              <span class="link" @click=${() => this.onExternalLink('https://platform.claude.com/')}
-                                                  >Get Claude key</span
-                                              >
-                                          </div>
-                                      </div>
-                                  `
-                                : ''
-                        }
-                    </div>
-
-                    <!-- OpenAI Card -->
-                    <div
-                        style="border: 1px solid ${this._activeAnswerProvider === 'openai' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
-                    >
-                        <div
-                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
-                            @click=${() => this._saveActiveAnswerProvider('openai')}
-                        >
-                            <input
-                                type="radio"
-                                name="active-provider"
-                                value="openai"
-                                ?checked=${this._activeAnswerProvider === 'openai'}
-                                style="cursor: pointer;"
-                            />
-                            <span
-                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
-                                >OpenAI ChatGPT</span
-                            >
-                        </div>
-                        ${
-                            this._activeAnswerProvider === 'openai'
-                                ? html`
-                                      <div
-                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
-                                      >
-                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">OpenAI API Key</label>
-                                          <input
-                                              type="password"
-                                              placeholder="Enter your OpenAI API key"
-                                              .value=${this._openaiKey}
-                                              @input=${e => this._saveOpenaiKey(e.target.value)}
-                                              class=${this._keyError && !this._openaiKey.trim() ? 'error' : ''}
-                                          />
-                                          <div class="form-hint">
-                                              <span class="link" @click=${() => this.onExternalLink('https://platform.openai.com/api-keys')}
-                                                  >Get OpenAI key</span
-                                              >
-                                          </div>
-                                          <div style="margin-top: 6px;">
-                                              <label class="form-label" style="font-size: 10px; opacity: 0.8;">OpenAI Answer Model</label>
-                                              <select
-                                                  .value=${this._openaiModel}
-                                                  @change=${e => this._saveOpenaiModel(e.target.value)}
-                                                  style="margin-top: 4px;"
-                                              >
-                                                  <option value="gpt-4o-mini">GPT-4o Mini (recommended)</option>
-                                                  <option value="gpt-4o">GPT-4o (highly intelligent)</option>
-                                                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                                                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo (legacy)</option>
-                                              </select>
-                                          </div>
-                                      </div>
-                                  `
-                                : ''
-                        }
-                    </div>
-
-                    <!-- Gemini Card -->
-                    <div
-                        style="border: 1px solid ${this._activeAnswerProvider === 'gemini' ? 'var(--accent)' : 'var(--border)'}; padding: 12px; border-radius: var(--radius-md); background: var(--bg-elevated); transition: border-color var(--transition);"
-                    >
-                        <div
-                            style="display: flex; align-items: center; gap: 10px; cursor: pointer;"
-                            @click=${() => this._saveActiveAnswerProvider('gemini')}
-                        >
-                            <input
-                                type="radio"
-                                name="active-provider"
-                                value="gemini"
-                                ?checked=${this._activeAnswerProvider === 'gemini'}
-                                style="cursor: pointer;"
-                            />
-                            <span
-                                style="font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); flex: 1;"
-                                >Google Gemini</span
-                            >
-                        </div>
-                        ${
-                            this._activeAnswerProvider === 'gemini'
-                                ? html`
-                                      <div
-                                          style="display: flex; flex-direction: column; gap: var(--space-xs); margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px;"
-                                      >
-                                          <label class="form-label" style="font-size: 10px; opacity: 0.8;">Gemini API Key</label>
-                                          <input
-                                              type="password"
-                                              placeholder="Enter your Gemini API key"
-                                              .value=${this._geminiKey}
-                                              @input=${e => this._saveGeminiKey(e.target.value)}
-                                              class=${this._keyError && !this._geminiKey.trim() ? 'error' : ''}
-                                          />
-                                          <div class="form-hint">
-                                              <span class="link" @click=${() => this.onExternalLink('https://aistudio.google.com/apikey')}
-                                                  >Get Gemini key</span
-                                              >
-                                          </div>
-                                      </div>
-                                  `
-                                : ''
-                        }
-                    </div>
+                <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;">
+                    <label class="form-label" style="margin:0;">AI Answer Provider</label>
+                    <span class="form-hint" style="margin:0; font-size:10px;">One active at a time</span>
                 </div>
-            </div>
 
-            <!-- On-Device Local Whisper Configuration -->
-            <div class="form-group" style="margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border);">
-                <label class="form-label" style="display: flex; align-items: center; gap: 8px;">
-                    Local Whisper Model (On-Device Transcription) ${this.whisperDownloading ? html`<div class="whisper-spinner"></div>` : ''}
-                </label>
-                <select
-                    .value=${this._localByokWhisperModel}
-                    @change=${e => this._saveLocalByokWhisperModel(e.target.value)}
-                    style="margin-top: 4px;"
-                >
-                    <option value="Xenova/whisper-tiny">Tiny (~40 MB, fastest)</option>
-                    <option value="Xenova/whisper-base">Base (~75 MB)</option>
-                    <option value="Xenova/whisper-small">Small (~250 MB, recommended)</option>
-                    <option value="Xenova/whisper-medium">Medium (~780 MB, most accurate)</option>
-                </select>
-                <div class="form-hint" style="margin-top: 4px;">
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                    ${enabled.map(p => {
+                        const isActive = this._activeAnswerProvider === p.id;
+                        return html`
+                            <div
+                                style="border:1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}; border-radius:var(--radius-md); background:var(--bg-elevated); transition:border-color var(--transition); overflow:hidden;"
+                            >
+                                <!-- Header row -->
+                                <div
+                                    style="display:flex; align-items:center; gap:10px; padding:11px 12px; cursor:pointer;"
+                                    @click=${() => this._saveActiveAnswerProvider(p.id)}
+                                >
+                                    <input
+                                        type="radio"
+                                        name="active-provider"
+                                        value=${p.id}
+                                        ?checked=${isActive}
+                                        style="cursor:pointer; pointer-events:none; flex-shrink:0;"
+                                    />
+                                    <div style="flex:1; min-width:0;">
+                                        <div
+                                            style="font-size:var(--font-size-sm); font-weight:var(--font-weight-semibold); color:var(--text-primary);"
+                                        >
+                                            ${p.label}
+                                            ${p.badge ? html`<span style="background:${p.badgeColor}; color:#fff; font-size:0.68em; padding:1px 5px; border-radius:3px; margin-left:6px; font-weight:bold;">${p.badge}</span>` : ''}
+                                        </div>
+                                        <div class="form-hint" style="margin-top:1px;">${p.sub}</div>
+                                    </div>
+                                    <!-- Disable toggle -->
+                                    ${
+                                        enabled.length > 1
+                                            ? html`<button
+                                                  style="background:none; border:none; color:var(--text-muted); font-size:0.75em; cursor:pointer; padding:2px 4px; border-radius:3px; opacity:0.6;"
+                                                  title="Hide this provider"
+                                                  @click=${e => {
+                                                  e.stopPropagation();
+                                                  this._toggleProvider(p.id);
+                                              }}
+                                              >
+                                                  ✕
+                                              </button>`
+                                            : ''
+                                    }
+                                </div>
+                                <!-- Expanded key + model section (only for active provider) -->
+                                ${
+                                    isActive
+                                        ? html`
+                                              <div
+                                                  style="padding:10px 12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:var(--space-xs);"
+                                              >
+                                                  <label class="form-label" style="font-size:10px; opacity:0.8;">API Key</label>
+                                                  <input
+                                                      type="password"
+                                                      placeholder=${p.keyPlaceholder}
+                                                      .value=${p.keyGetter()}
+                                                      @input=${e => p.keySetter(e.target.value)}
+                                                      class=${p.keyClass()}
+                                                  />
+                                                  <div class="form-hint">
+                                                      <span class="link" @click=${() => this.onExternalLink(p.link)}>${p.linkLabel} →</span>
+                                                  </div>
+                                                  ${p.extra(true)}
+                                                  ${
+                                            p.id === 'groq'
+                                                ? html` <div class="form-hint" style="margin-top:4px; color:var(--success,#22c55e);">
+                                                      ✓ Transcription via Groq Whisper — no local download needed
+                                                  </div>`
+                                                : ''
+                                        }
+                                              </div>
+                                          `
+                                        : ''
+                                }
+                            </div>
+                        `;
+                    })}
+
+                    <!-- "Add provider" expander for hidden providers -->
                     ${
-                        this.whisperDownloading
-                            ? html`<span style="color: var(--accent); font-weight: 500;">⏳ Downloading model...</span>`
-                            : 'Audio transcription runs 100% locally on your machine.'
+                        disabled.length > 0
+                            ? html`
+                                  <details style="margin-top:2px;">
+                                      <summary
+                                          style="font-size:var(--font-size-xs); color:var(--text-muted); cursor:pointer; user-select:none; list-style:none; display:flex; align-items:center; gap:4px;"
+                                      >
+                                          <span>＋ Add another provider</span>
+                                          <span style="opacity:0.6;">(${disabled.map(p => p.label).join(', ')})</span>
+                                      </summary>
+                                      <div style="display:flex; flex-direction:column; gap:6px; margin-top:8px;">
+                                          ${disabled.map(
+                                    p => html`
+                                        <div
+                                            style="display:flex; align-items:center; gap:10px; padding:9px 12px; border:1px solid var(--border); border-radius:var(--radius-md); background:var(--bg-elevated); cursor:pointer; opacity:0.7;"
+                                            @click=${() => this._toggleProvider(p.id)}
+                                        >
+                                            <span style="font-size:1.1em;">+</span>
+                                            <div style="flex:1;">
+                                                <div
+                                                    style="font-size:var(--font-size-sm); font-weight:var(--font-weight-semibold); color:var(--text-primary);"
+                                                >
+                                                    ${p.label}
+                                                </div>
+                                                <div class="form-hint" style="margin-top:1px;">${p.sub}</div>
+                                            </div>
+                                        </div>
+                                    `
+                                )}
+                                      </div>
+                                  </details>
+                              `
+                            : ''
                     }
                 </div>
             </div>
 
+            <!-- Local Whisper section: only shown when active provider is NOT Groq -->
+            ${
+                needsLocalWhisper
+                    ? html`
+                          <div class="form-group" style="margin-top:8px; padding-top:12px; border-top:1px solid var(--border);">
+                              <label class="form-label" style="display:flex; align-items:center; gap:8px;">
+                                  Local Whisper Transcription ${this.whisperDownloading ? html`<div class="whisper-spinner"></div>` : ''}
+                              </label>
+                              <div class="form-hint" style="margin-bottom:8px;">
+                                  ${this._activeAnswerProvider.toUpperCase()} does not include free transcription. Your microphone audio will be
+                                  transcribed locally on this device.
+                              </div>
+                              <select
+                                  .value=${this._localByokWhisperModel}
+                                  @change=${e => this._saveLocalByokWhisperModel(e.target.value)}
+                                  style="margin-top:4px;"
+                              >
+                                  <option value="Xenova/whisper-tiny">Tiny (~40 MB, fastest)</option>
+                                  <option value="Xenova/whisper-base">Base (~75 MB)</option>
+                                  <option value="Xenova/whisper-small">Small (~250 MB, recommended)</option>
+                                  <option value="Xenova/whisper-medium">Medium (~780 MB, most accurate)</option>
+                              </select>
+                              ${
+                        this.whisperDownloading
+                            ? html`<div style="color:var(--accent); font-size:var(--font-size-xs); font-weight:500; margin-top:6px;">
+                                  ⏳ Downloading model…
+                              </div>`
+                            : html`<div class="form-hint" style="margin-top:6px;">Downloaded once, cached forever. No re-download on restart.</div>`
+                    }
+                          </div>
+                      `
+                    : ''
+            }
             ${this._renderStartButton()} ${this._renderDivider()}
 
             <div class="mode-links">

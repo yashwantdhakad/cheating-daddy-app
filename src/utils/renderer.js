@@ -161,21 +161,59 @@ async function initializeGemini(profile = 'interview', language = 'en-US') {
 
 async function initializeLocal(profile = 'interview') {
     const prefs = await storage.getPreferences();
+    const customPrompt = prefs.customPrompt || '';
+    const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
+
+    // BYOK mode: cloud answers, smart whisper selection
+    if (providerMode === 'byok') {
+        const groqApiKey = await storage.getGroqApiKey();
+        const hasGroqKey = !!(groqApiKey && groqApiKey.trim());
+
+        // Whisper selection: derived automatically from the active answer provider.
+        //   • Groq is active → use Groq cloud Whisper (no download, no delay)
+        //   • Any other provider → local on-device Whisper (downloaded once, cached)
+        // Advanced: set transcriptionSource='local' in prefs to force local even on Groq.
+        let activeProvider = prefs.activeAnswerProvider || 'groq';
+        if (activeProvider.includes(',')) {
+            activeProvider = activeProvider.split(',')[0].trim();
+        }
+        if (!['groq', 'openai', 'claude', 'gemini'].includes(activeProvider)) {
+            activeProvider = 'groq';
+        }
+        const forceLocal = prefs.transcriptionSource === 'local';
+
+        let whisperModel;
+        if (hasGroqKey && !forceLocal) {
+            whisperModel = 'groq-api'; // Use Groq Cloud Whisper if a key is present (instant, crash-free)
+        } else {
+            whisperModel = prefs.localByokWhisperModel || 'Xenova/whisper-small';
+        }
+
+        const success = await ipcRenderer.invoke(
+            'initialize-local',
+            '', // host — no local server in BYOK mode
+            '', // model
+            whisperModel,
+            profile,
+            customPrompt,
+            'byok', // backend — tells localai.js to skip Ollama/LM Studio
+            'cloud' // answerMode — cloud providers handle responses
+        );
+        if (success) {
+            cheatingDaddy.setStatus('Local AI Live');
+            return true;
+        } else {
+            cheatingDaddy.setStatus('error');
+            return false;
+        }
+    }
+
+    // Local AI mode (Ollama / LM Studio)
     let backend = prefs.localBackend || 'ollama';
     let host = backend === 'lmstudio' ? prefs.lmstudioHost || 'http://127.0.0.1:1234' : prefs.ollamaHost || 'http://127.0.0.1:11434';
     let model = backend === 'lmstudio' ? prefs.lmstudioModel || '' : prefs.ollamaModel || 'llama3.1';
     let whisperModel = prefs.whisperModel || 'Xenova/whisper-small';
-    const customPrompt = prefs.customPrompt || '';
     let answerMode = prefs.localAnswerMode || 'local';
-
-    // In BYOK mode, always run Whisper locally on-device and send answers to the cloud
-    const providerMode = prefs.providerMode === 'cloud' ? 'byok' : prefs.providerMode || 'byok';
-    if (providerMode === 'byok') {
-        whisperModel = prefs.localByokWhisperModel || 'Xenova/whisper-small';
-        answerMode = 'cloud';
-        host = '';
-        model = '';
-    }
 
     const success = await ipcRenderer.invoke('initialize-local', host, model, whisperModel, profile, customPrompt, backend, answerMode);
     if (success) {
@@ -261,10 +299,8 @@ window.addEventListener(
     'wheel',
     e => {
         if (!clickThroughMode) return;
-        const isSmart = preferencesCache?.smartClickThrough ?? false;
-        if (!isSmart) return;
 
-        // Manually scroll response container in ghost mode
+        // Always allow mouse wheel to scroll the response container in ghost mode
         const app = document.querySelector('cheating-daddy-app');
         if (app && app.shadowRoot) {
             const assistantView = app.shadowRoot.querySelector('assistant-view');
@@ -296,44 +332,69 @@ async function startCapture(screenshotIntervalSeconds = 5, imageQuality = 'mediu
 
     try {
         if (isMacOS) {
-            // On macOS, use SystemAudioDump for audio and getDisplayMedia for screen
-            console.log('Starting macOS capture with SystemAudioDump...');
-
-            // Start macOS audio capture
-            const audioResult = await ipcRenderer.invoke('start-macos-audio');
-            if (!audioResult.success) {
-                throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
-            }
-
-            // Get screen capture for screenshots
-            mediaStream = await navigator.mediaDevices.getDisplayMedia({
-                video: {
-                    frameRate: 1,
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 },
-                },
-                audio: false, // Don't use browser audio on macOS
-            });
-
-            console.log('macOS screen capture started - audio handled by SystemAudioDump');
-
-            if (audioMode === 'mic_only' || audioMode === 'both') {
+            if (audioMode === 'mic_only') {
+                // macOS Microphone-Only Stealth Mode:
+                // Bypasses getDisplayMedia and SystemAudioDump entirely to completely
+                // avoid triggering the macOS screen recording menu bar icon!
+                console.log('Starting macOS Microphone-Only Stealth Mode (no screen recording icon)...');
                 let micStream = null;
                 try {
                     micStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             sampleRate: SAMPLE_RATE,
                             channelCount: 1,
-                            echoCancellation: true,
-                            noiseSuppression: true,
+                            echoCancellation: false, // Disabled to capture speaker bleed (interviewer) clearly
+                            noiseSuppression: false, // Disabled to capture speaker bleed clearly
                             autoGainControl: true,
                         },
                         video: false,
                     });
-                    console.log('macOS microphone capture started');
+                    console.log('macOS microphone capture started (stealth mode)');
                     setupLinuxMicProcessing(micStream);
                 } catch (micError) {
-                    console.warn('Failed to get microphone access on macOS:', micError);
+                    throw new Error('Failed to get microphone access: ' + micError.message);
+                }
+                mediaStream = micStream;
+            } else {
+                // Standard mode (Speaker only or Both): requires SystemAudioDump and getDisplayMedia
+                console.log('Starting macOS capture with SystemAudioDump...');
+
+                // Start macOS audio capture
+                const audioResult = await ipcRenderer.invoke('start-macos-audio');
+                if (!audioResult.success) {
+                    throw new Error('Failed to start macOS audio capture: ' + audioResult.error);
+                }
+
+                // Get screen capture for screenshots
+                mediaStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        frameRate: 1,
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 },
+                    },
+                    audio: false, // Don't use browser audio on macOS
+                });
+
+                console.log('macOS screen capture started - audio handled by SystemAudioDump');
+
+                if (audioMode === 'both') {
+                    let micStream = null;
+                    try {
+                        micStream = await navigator.mediaDevices.getUserMedia({
+                            audio: {
+                                sampleRate: SAMPLE_RATE,
+                                channelCount: 1,
+                                echoCancellation: true,
+                                noiseSuppression: true,
+                                autoGainControl: true,
+                            },
+                            video: false,
+                        });
+                        console.log('macOS microphone capture started');
+                        setupLinuxMicProcessing(micStream);
+                    } catch (micError) {
+                        console.warn('Failed to get microphone access on macOS:', micError);
+                    }
                 }
             }
         } else if (isLinux) {
@@ -558,8 +619,8 @@ async function captureManualScreenshot(imageQuality = null) {
     console.log('Manual screenshot triggered');
     const quality = imageQuality || currentImageQuality;
 
-    if (!mediaStream) {
-        console.error('No media stream available');
+    if (!mediaStream || mediaStream.getVideoTracks().length === 0) {
+        console.warn('No video tracks available for screenshot');
         return;
     }
 

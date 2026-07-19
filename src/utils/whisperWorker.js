@@ -10,8 +10,8 @@ function getPipeline(modelName, cacheDir) {
             const { pipeline, env } = await import('@huggingface/transformers');
             env.cacheDir = cacheDir;
             return pipeline('automatic-speech-recognition', modelName, {
-                dtype: 'q8',
-                device: 'auto',
+                dtype: 'fp32',
+                device: 'cpu',
             });
         })();
     }

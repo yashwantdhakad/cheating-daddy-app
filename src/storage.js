@@ -41,6 +41,14 @@ const DEFAULT_PREFERENCES = {
     autoCopyClipboard: false,
     vadMode: 'VERY_AGGRESSIVE',
     useGroqTranscription: true,
+    // BYOK mode: which cloud provider handles answers
+    activeAnswerProvider: 'groq', // 'groq' | 'openai' | 'claude' | 'gemini'
+    // Which provider cards are shown in the settings UI (comma-separated string)
+    enabledProviders: 'groq,openai',
+    // BYOK transcription source: 'groq' = Groq Cloud Whisper (default, no download) | 'local' = on-device Whisper
+    transcriptionSource: 'groq',
+    // Whisper model used only when transcriptionSource === 'local'
+    localByokWhisperModel: 'Xenova/whisper-small',
 };
 
 const DEFAULT_KEYBINDS = null; // null means use system defaults

@@ -1,4 +1,4 @@
-const { BrowserWindow, globalShortcut, ipcMain, screen } = require('electron');
+const { BrowserWindow, globalShortcut, ipcMain, screen, shell } = require('electron');
 const path = require('node:path');
 const storage = require('../storage');
 
@@ -11,13 +11,9 @@ function setClickThroughMode(mainWindow, enabled) {
     if (mainWindow.isDestroyed()) return;
     mouseEventsIgnored = enabled;
     if (enabled) {
-        const prefs = storage.getPreferences();
-        const smart = prefs.smartClickThrough ?? false;
-        if (smart) {
-            mainWindow.setIgnoreMouseEvents(true, { forward: true });
-        } else {
-            mainWindow.setIgnoreMouseEvents(true);
-        }
+        // Always forward mouse events (movement and scroll wheel) to the renderer web page,
+        // while clicks still pass through. This lets the user scroll response text in ghost mode.
+        mainWindow.setIgnoreMouseEvents(true, { forward: true });
     } else {
         mainWindow.setIgnoreMouseEvents(false);
     }
@@ -89,6 +85,16 @@ function createWindow(sendToRenderer, geminiSessionRef) {
     }
 
     mainWindow.loadFile(path.join(__dirname, '../index.html'));
+
+    // Prevent navigation and open all link clicks in default external browser
+    mainWindow.webContents.on('will-navigate', (event, url) => {
+        event.preventDefault();
+        shell.openExternal(url);
+    });
+    mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+        shell.openExternal(url);
+        return { action: 'deny' };
+    });
 
     // After window is created, initialize keybinds
     mainWindow.webContents.once('dom-ready', () => {
